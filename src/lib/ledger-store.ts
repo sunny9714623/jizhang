@@ -385,7 +385,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
   ready: true,
   txs: SAMPLE_TX,
   tab: "home",
-  month: "2026-08",
+  month: monthKey(Date.now()),
   search: "",
   catFilter: null,
   groupFilter: null,
