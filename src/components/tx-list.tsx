@@ -431,14 +431,22 @@ export function TxDetail() {
   const tx = txs.find((t) => t.id === id);
   const [merchant, setMerchant] = useState("");
   const [day, setDay] = useState("");
+  const [method, setMethod] = useState("");
+  const [note, setNote] = useState("");
   useEffect(() => {
     if (!tx) return;
     setMerchant(tx.merchant);
     setDay(shanghaiDayValue(tx.time));
+    setMethod(tx.method);
+    setNote(tx.note);
   }, [tx?.id]);
   if (!tx) return null;
   const canEdit = tab === "list";
-  const dirty = merchant.trim() !== tx.merchant || day !== shanghaiDayValue(tx.time);
+  const dirty =
+    merchant.trim() !== tx.merchant ||
+    day !== shanghaiDayValue(tx.time) ||
+    method.trim() !== tx.method ||
+    note.trim() !== tx.note;
 
   return (
     <div
@@ -484,8 +492,34 @@ export function TxDetail() {
             {formatYuan(tx.amountFen)}
           </p>
           <p className="mt-2 text-sm text-muted">
-            {tx.title || "无说明"} · {tx.method || "未注明支付方式"}
+            {tx.title || "无说明"}
           </p>
+          {canEdit ? (
+            <label className="mt-4 block">
+              <span className="text-xs text-muted">支付方式</span>
+              <input
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
+                placeholder="如 微信 / 支付宝 / 花呗 / 银行卡"
+                className="mt-1 h-11 w-full rounded-md bg-elevated px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+              />
+            </label>
+          ) : (
+            <p className="mt-2 text-sm text-muted">{tx.method || "未注明支付方式"}</p>
+          )}
+          {canEdit ? (
+            <label className="mt-3 block">
+              <span className="text-xs text-muted">备注</span>
+              <input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="如 和朋友AA / 生日红包"
+                className="mt-1 h-11 w-full rounded-md bg-elevated px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+              />
+            </label>
+          ) : (
+            <p className="mt-2 text-sm text-muted">{tx.note || "无备注"}</p>
+          )}
           <p className="mt-4 text-xs text-muted">改分类</p>
           <CatPick tx={tx} locked={!canEdit} />
         </div>
@@ -505,6 +539,8 @@ export function TxDetail() {
                 void updateTx(tx.id, {
                   merchant,
                   time: setShanghaiDay(tx.time, day),
+                  method,
+                  note,
                 });
               }}
             >

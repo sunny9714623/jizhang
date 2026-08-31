@@ -140,7 +140,10 @@ type LedgerState = {
   recordQuick: (draft: ChatDraft) => Promise<Tx | null>;
   recordMany: (drafts: ChatDraft[]) => Promise<number>;
   recategorize: (id: string, category: CategoryId) => Promise<void>;
-  updateTx: (id: string, patch: { merchant?: string; time?: number }) => Promise<void>;
+  updateTx: (
+    id: string,
+    patch: { merchant?: string; time?: number; method?: string; note?: string },
+  ) => Promise<void>;
   remove: (id: string) => Promise<void>;
   removeMany: (ids: string[]) => Promise<void>;
   importFiles: (files: File[]) => Promise<void>;
@@ -661,6 +664,8 @@ export const useLedger = create<LedgerState>((set, get) => ({
       ...tx,
       merchant: merchant || tx.merchant,
       time: patch.time ?? tx.time,
+      method: patch.method !== undefined ? patch.method.trim() : tx.method,
+      note: patch.note !== undefined ? patch.note.trim() : tx.note,
     };
     set({
       txs: sortTx(get().txs.map((t) => (t.id === id ? next : t))),
