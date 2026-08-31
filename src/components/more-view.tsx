@@ -36,7 +36,7 @@ export function MoreView() {
   const kinds = useLedger((s) => s.kinds);
   const setRemindRecord = useLedger((s) => s.setRemindRecord);
   const exportBackup = useLedger((s) => s.exportBackup);
-  const worth = netWorth(inLedger(accounts, ledgerId), kinds);
+  const worth = netWorth(accounts, kinds);
 
   useEffect(() => {
     if (typeof Notification === "undefined") {
@@ -176,9 +176,8 @@ export function MoreView() {
 
 function AccountList() {
   const all = useLedger((s) => s.accounts);
-  const ledgerId = useLedger((s) => s.ledgerId);
   const kinds = useLedger((s) => s.kinds);
-  const accounts = inLedger(all, ledgerId);
+  const accounts = all;
   const upsert = useLedger((s) => s.upsertAccount);
   const remove = useLedger((s) => s.removeAccount);
   const [open, setOpen] = useState(false);
