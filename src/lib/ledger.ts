@@ -129,6 +129,24 @@ export function monthKey(time: number): string {
   return `${year}-${month}`;
 }
 
+export function shanghaiDayValue(time: number): string {
+  const { year, month, day } = shanghaiDate(time);
+  return `${year}-${month}-${String(day).padStart(2, "0")}`;
+}
+
+export function setShanghaiDay(time: number, ymd: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return time;
+  const clock = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(time));
+  const next = new Date(`${ymd}T${clock}+08:00`).getTime();
+  return Number.isFinite(next) ? next : time;
+}
+
 export function isAccountTx(tx: Pick<Tx, "id" | "method" | "status">): boolean {
   return tx.id.startsWith("acct-") || tx.method === "账户" || tx.status === "资产" || tx.status === "负债";
 }

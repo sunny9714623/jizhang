@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { formatYuan, shanghaiDate, signedYuan, type Tx } from "@/lib/ledger";
+import { formatYuan, shanghaiDate, shanghaiDayValue, setShanghaiDay, signedYuan, type Tx } from "@/lib/ledger";
 import { findGroup, groupsFor, leafLabel, leavesIn, type CatLeaf } from "@/lib/categories";
 import { useLedger, visibleTxs } from "@/lib/ledger-store";
 import { txsInLedger } from "@/lib/ledgers";
@@ -427,9 +427,18 @@ export function TxDetail() {
   const txs = useLedger((s) => s.txs);
   const select = useLedger((s) => s.select);
   const remove = useLedger((s) => s.remove);
+  const updateTx = useLedger((s) => s.updateTx);
   const tx = txs.find((t) => t.id === id);
+  const [merchant, setMerchant] = useState("");
+  const [day, setDay] = useState("");
+  useEffect(() => {
+    if (!tx) return;
+    setMerchant(tx.merchant);
+    setDay(shanghaiDayValue(tx.time));
+  }, [tx?.id]);
   if (!tx) return null;
   const canEdit = tab === "list";
+  const dirty = merchant.trim() !== tx.merchant || day !== shanghaiDayValue(tx.time);
 
   return (
     <div
@@ -441,10 +450,33 @@ export function TxDetail() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-5">
-          <p className="text-xs text-muted">
-            {new Date(tx.time).toLocaleString("zh-CN", { hour12: false })}
-          </p>
-          <p className="mt-1 font-display text-2xl text-fg">{tx.merchant}</p>
+          {canEdit ? (
+            <label className="block">
+              <span className="text-xs text-muted">日期</span>
+              <input
+                type="date"
+                value={day}
+                onChange={(e) => setDay(e.target.value)}
+                className="mt-1 h-11 w-full rounded-md bg-elevated px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+              />
+            </label>
+          ) : (
+            <p className="text-xs text-muted">
+              {new Date(tx.time).toLocaleString("zh-CN", { hour12: false })}
+            </p>
+          )}
+          {canEdit ? (
+            <label className="mt-3 block">
+              <span className="text-xs text-muted">商家</span>
+              <input
+                value={merchant}
+                onChange={(e) => setMerchant(e.target.value)}
+                className="mt-1 h-11 w-full rounded-md bg-elevated px-3 font-display text-xl text-fg shadow-[var(--shadow-border)]"
+              />
+            </label>
+          ) : (
+            <p className="mt-1 font-display text-2xl text-fg">{tx.merchant}</p>
+          )}
           <p
             className={`mt-2 font-display text-4xl tabular-nums ${tx.direction === "income" ? "text-income" : "text-fg"}`}
           >
@@ -465,6 +497,20 @@ export function TxDetail() {
           >
             关闭
           </button>
+          {canEdit && dirty ? (
+            <button
+              type="button"
+              className="h-11 flex-1 rounded-md bg-primary text-sm text-primary-fg"
+              onClick={() => {
+                void updateTx(tx.id, {
+                  merchant,
+                  time: setShanghaiDay(tx.time, day),
+                });
+              }}
+            >
+              保存
+            </button>
+          ) : null}
           {canEdit ? (
             <button
               type="button"

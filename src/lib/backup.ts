@@ -102,6 +102,31 @@ export function snapshotFrom(state: {
   };
 }
 
+export type LedgerPack = {
+  v: 1;
+  kind: "ledger-pack";
+  savedAt: number;
+  ledger: LedgerFile;
+  txs: Tx[];
+  accounts: Account[];
+  recurring: Recurring[];
+};
+
+export function isLedgerPack(data: unknown): data is LedgerPack {
+  const row = data as LedgerPack;
+  return Boolean(row && row.v === 1 && row.kind === "ledger-pack" && row.ledger && Array.isArray(row.txs));
+}
+
+export function downloadLedgerPack(pack: LedgerPack) {
+  const blob = new Blob([JSON.stringify(pack)], { type: "application/json" });
+  const a = document.createElement("a");
+  const day = new Date(pack.savedAt).toISOString().slice(0, 10);
+  a.href = URL.createObjectURL(blob);
+  a.download = `月梨-${pack.ledger.name}-${day}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 export function downloadSnapshot(snap: Snapshot) {
   const blob = new Blob([JSON.stringify(snap)], { type: "application/json" });
   const a = document.createElement("a");
@@ -115,9 +140,20 @@ export function downloadSnapshot(snap: Snapshot) {
 export async function parseSnapshotFile(file: File): Promise<Snapshot | null> {
   const text = await file.text();
   try {
-    const data = JSON.parse(text) as Snapshot;
+    const data = JSON.parse(text) as Snapshot & { kind?: string };
+    if (data?.kind === "ledger-pack") return null;
     if (data?.v !== 1 || !Array.isArray(data.txs)) return null;
     return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function parseLedgerPackFile(file: File): Promise<LedgerPack | null> {
+  const text = await file.text();
+  try {
+    const data = JSON.parse(text) as unknown;
+    return isLedgerPack(data) ? data : null;
   } catch {
     return null;
   }

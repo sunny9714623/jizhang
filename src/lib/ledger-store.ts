@@ -43,9 +43,11 @@ import { DEFAULT_LEDGER, DEFAULT_LEDGER_ID, type LedgerFile } from "./ledgers";
 import { isAutoFineId, toPlainCategory } from "./fine-cat";
 import {
   downloadSnapshot,
+  downloadLedgerPack,
   isSnapshotFile,
   markUsed,
   parseSnapshotFile,
+  parseLedgerPackFile,
   readSnapshot,
   requestPersist,
   scheduleSnapshot,
@@ -134,11 +136,14 @@ type LedgerState = {
   recordQuick: (draft: ChatDraft) => Promise<Tx | null>;
   recordMany: (drafts: ChatDraft[]) => Promise<number>;
   recategorize: (id: string, category: CategoryId) => Promise<void>;
+  updateTx: (id: string, patch: { merchant?: string; time?: number }) => Promise<void>;
   remove: (id: string) => Promise<void>;
   removeMany: (ids: string[]) => Promise<void>;
   importFiles: (files: File[]) => Promise<void>;
   restoreBackup: (file: File) => Promise<void>;
   exportBackup: () => void;
+  exportLedgerBackup: (id?: string) => void;
+  restoreLedgerBackup: (file: File) => Promise<void>;
   confirmImport: () => Promise<void>;
   cancelPreview: () => void;
   dismissSample: () => Promise<void>;
@@ -626,6 +631,27 @@ export const useLedger = create<LedgerState>((set, get) => ({
     await dbPutTx(next);
   },
 
+  updateTx: async (id, patch) => {
+    const tx = get().txs.find((t) => t.id === id);
+    if (!tx) return;
+    const merchant = patch.merchant !== undefined ? patch.merchant.trim() : tx.merchant;
+    if (patch.merchant !== undefined && !merchant) {
+      toast.message("商家不能为空");
+      return;
+    }
+    const next = {
+      ...tx,
+      merchant: merchant || tx.merchant,
+      time: patch.time ?? tx.time,
+    };
+    set({
+      txs: sortTx(get().txs.map((t) => (t.id === id ? next : t))),
+      selectedId: id,
+    });
+    await dbPutTx(next);
+    toast.success("已保存");
+  },
+
   remove: async (id) => {
     const txs = get().txs.filter((t) => t.id !== id);
     set({ txs, selectedId: null, usingSample: false });
@@ -670,6 +696,11 @@ export const useLedger = create<LedgerState>((set, get) => ({
   },
 
   restoreBackup: async (file) => {
+    const pack = await parseLedgerPackFile(file);
+    if (pack) {
+      await get().restoreLedgerBackup(file);
+      return;
+    }
     const snap = await parseSnapshotFile(file);
     if (!snap) {
       toast.error("这不是月梨备份文件");
@@ -677,6 +708,70 @@ export const useLedger = create<LedgerState>((set, get) => ({
     }
     await applySnap(snap, set);
     toast.success(`已恢复 ${snap.txs.length} 笔`);
+  },
+
+  exportLedgerBackup: (id) => {
+    const ledgerId = id ?? get().ledgerId;
+    const ledger = get().ledgers.find((l) => l.id === ledgerId);
+    if (!ledger) {
+      toast.message("没有这本账");
+      return;
+    }
+    const txs = get().txs.filter(
+      (t) => (t.ledgerId ?? DEFAULT_LEDGER_ID) === ledgerId && t.origin !== "sample",
+    );
+    downloadLedgerPack({
+      v: 1,
+      kind: "ledger-pack",
+      savedAt: Date.now(),
+      ledger,
+      txs,
+      accounts: get().accounts.filter((a) => (a.ledgerId ?? DEFAULT_LEDGER_ID) === ledgerId),
+      recurring: get().recurring.filter((r) => (r.ledgerId ?? DEFAULT_LEDGER_ID) === ledgerId),
+    });
+    toast.success(`已导出「${ledger.name}」`);
+  },
+
+  restoreLedgerBackup: async (file) => {
+    const pack = await parseLedgerPackFile(file);
+    if (!pack) {
+      toast.error("这不是单本账本备份");
+      return;
+    }
+    const id = newId();
+    const taken = get().ledgers.some((l) => l.name === pack.ledger.name);
+    const ledger: LedgerFile = {
+      ...pack.ledger,
+      id,
+      name: taken ? `${pack.ledger.name} 恢复` : pack.ledger.name,
+      createdAt: Date.now(),
+    };
+    const txs = pack.txs.map((t) => ({
+      ...t,
+      id: newId(),
+      ledgerId: id,
+      origin: t.origin === "sample" ? ("manual" as const) : t.origin,
+    }));
+    const accounts = (pack.accounts ?? []).map((a) => ({ ...a, id: newId(), ledgerId: id }));
+    const recurring = (pack.recurring ?? []).map((r) => ({ ...r, id: newId(), ledgerId: id }));
+    const keepTxs = get().usingSample ? get().txs.filter((t) => t.origin !== "sample") : get().txs;
+    set({
+      ledgers: [...get().ledgers, ledger],
+      ledgerId: id,
+      txs: sortTx([...keepTxs, ...txs]),
+      accounts: [...get().accounts, ...accounts],
+      recurring: [...get().recurring, ...recurring],
+      usingSample: false,
+      tab: "books",
+    });
+    markUsed();
+    await dbSetMeta("ledgers", [...get().ledgers]);
+    await dbSetMeta("ledgerId", id);
+    await dbSetMeta("accounts", get().accounts);
+    await dbSetMeta("recurring", get().recurring);
+    await dbSetMeta("usingSample", false);
+    if (txs.length) await dbPutMany(txs);
+    toast.success(`已恢复账本「${ledger.name}」${txs.length} 笔`);
   },
 
   importFiles: async (files) => {
