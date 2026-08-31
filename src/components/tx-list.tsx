@@ -433,12 +433,14 @@ export function TxDetail() {
   const [day, setDay] = useState("");
   const [method, setMethod] = useState("");
   const [note, setNote] = useState("");
+  const [amount, setAmount] = useState("");
   useEffect(() => {
     if (!tx) return;
     setMerchant(tx.merchant);
     setDay(shanghaiDayValue(tx.time));
     setMethod(tx.method);
     setNote(tx.note);
+    setAmount((tx.amountFen / 100).toFixed(2));
   }, [tx?.id]);
   if (!tx) return null;
   const canEdit = tab === "list";
@@ -446,7 +448,8 @@ export function TxDetail() {
     merchant.trim() !== tx.merchant ||
     day !== shanghaiDayValue(tx.time) ||
     method.trim() !== tx.method ||
-    note.trim() !== tx.note;
+    note.trim() !== tx.note ||
+    Math.round(Number.parseFloat(amount) * 100) !== tx.amountFen;
 
   return (
     <div
@@ -485,12 +488,24 @@ export function TxDetail() {
           ) : (
             <p className="mt-1 font-display text-2xl text-fg">{tx.merchant}</p>
           )}
-          <p
-            className={`mt-2 font-display text-4xl tabular-nums ${tx.direction === "income" ? "text-income" : "text-fg"}`}
-          >
-            {tx.direction === "income" ? "+" : tx.direction === "expense" ? "−" : ""}
-            {formatYuan(tx.amountFen)}
-          </p>
+          {canEdit ? (
+            <label className="mt-3 block">
+              <span className="text-xs text-muted">金额（元）</span>
+              <input
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                inputMode="decimal"
+                className="mt-1 h-14 w-full rounded-md bg-elevated px-3 font-display text-4xl tabular-nums text-fg shadow-[var(--shadow-border)]"
+              />
+            </label>
+          ) : (
+            <p
+              className={`mt-2 font-display text-4xl tabular-nums ${tx.direction === "income" ? "text-income" : "text-fg"}`}
+            >
+              {tx.direction === "income" ? "+" : tx.direction === "expense" ? "−" : ""}
+              {formatYuan(tx.amountFen)}
+            </p>
+          )}
           <p className="mt-2 text-sm text-muted">
             {tx.title || "无说明"}
           </p>
@@ -541,6 +556,7 @@ export function TxDetail() {
                   time: setShanghaiDay(tx.time, day),
                   method,
                   note,
+                  amountFen: Math.round(Number.parseFloat(amount) * 100),
                 });
               }}
             >

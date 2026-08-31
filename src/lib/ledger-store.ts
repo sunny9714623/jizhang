@@ -30,6 +30,7 @@ import { SAMPLE_ACCOUNTS, SAMPLE_RECURRING, SAMPLE_TX } from "./seed";
 import {
   addCadence,
   accountTxMeta,
+  isAssetKind,
   isSampleAccount,
   signedBalance,
   DEFAULT_KINDS,
@@ -142,7 +143,13 @@ type LedgerState = {
   recategorize: (id: string, category: CategoryId) => Promise<void>;
   updateTx: (
     id: string,
-    patch: { merchant?: string; time?: number; method?: string; note?: string },
+    patch: {
+      merchant?: string;
+      time?: number;
+      method?: string;
+      note?: string;
+      amountFen?: number;
+    },
   ) => Promise<void>;
   remove: (id: string) => Promise<void>;
   removeMany: (ids: string[]) => Promise<void>;
@@ -660,13 +667,38 @@ export const useLedger = create<LedgerState>((set, get) => ({
       toast.message("商家不能为空");
       return;
     }
+    if (patch.amountFen !== undefined && (!Number.isInteger(patch.amountFen) || patch.amountFen <= 0)) {
+      toast.message("金额需大于 0");
+      return;
+    }
     const next = {
       ...tx,
       merchant: merchant || tx.merchant,
       time: patch.time ?? tx.time,
       method: patch.method !== undefined ? patch.method.trim() : tx.method,
       note: patch.note !== undefined ? patch.note.trim() : tx.note,
+      amountFen: patch.amountFen ?? tx.amountFen,
     };
+    // 账户联动流水：同步调整对应账户余额，保持净资产一致。
+    if (patch.amountFen !== undefined) {
+      const account = get().accounts.find((a) => accountTxId(a.id) === tx.id);
+      if (account) {
+        const oldSigned = tx.direction === "expense" ? -tx.amountFen : tx.amountFen;
+        const newSigned = next.direction === "expense" ? -next.amountFen : next.amountFen;
+        const delta = newSigned - oldSigned;
+        if (delta !== 0) {
+          const asset = isAssetKind(account.kind, get().kinds);
+          const nextSigned = signedBalance(account, get().kinds) + delta;
+          const updatedAccount = {
+            ...account,
+            balanceFen: Math.max(0, asset ? nextSigned : -nextSigned),
+          };
+          const accounts = get().accounts.map((a) => (a.id === account.id ? updatedAccount : a));
+          set({ accounts });
+          await dbSetMeta("accounts", accounts);
+        }
+      }
+    }
     set({
       txs: sortTx(get().txs.map((t) => (t.id === id ? next : t))),
       selectedId: id,
