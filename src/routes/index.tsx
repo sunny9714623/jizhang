@@ -148,7 +148,7 @@ function Home() {
               className="block w-full min-w-0 text-left"
               onClick={() => setTab("books")}
             >
-              <p className={cn("truncate font-display text-3xl leading-none", lightTitle ? "text-primary-fg" : "text-fg")}>
+              <p className={cn("font-display text-3xl leading-tight", lightTitle ? "text-primary-fg" : "text-fg")}>
                 {ledgers.find((l) => l.id === ledgerId)?.name ?? "月梨账单"}
               </p>
             </button>
