@@ -80,19 +80,6 @@ export function BooksView() {
           {merging ? "取消合并" : "合并账本"}
         </button>
       </div>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className="h-10 flex-1 rounded-full bg-elevated text-sm text-fg shadow-[var(--shadow-border)]"
-          onClick={() => setTab("more")}
-        >
-          备份与恢复
-        </button>
-        <p className="flex h-10 flex-1 items-center justify-center rounded-full bg-elevated text-xs text-muted">
-          导出/恢复在「家当」
-        </p>
-      </div>
-
       {adding ? (
         <form
           className="rounded-lg bg-elevated px-4 py-3 shadow-[var(--shadow-border)]"
