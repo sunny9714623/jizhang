@@ -43,11 +43,9 @@ import { DEFAULT_LEDGER, DEFAULT_LEDGER_ID, type LedgerFile } from "./ledgers";
 import { isAutoFineId, toPlainCategory } from "./fine-cat";
 import {
   downloadSnapshot,
-  downloadLedgerPack,
   isSnapshotFile,
   markUsed,
-  parseSnapshotFile,
-  parseLedgerPackFile,
+  parseRestoreFile,
   readSnapshot,
   requestPersist,
   scheduleSnapshot,
@@ -55,6 +53,7 @@ import {
   wasUsed,
   writeSnapshot,
   type Snapshot,
+  type RestorePlan,
 } from "./backup";
 
 function unionLeaves(lists: (CatLeaf[] | undefined)[]): CatLeaf[] {
@@ -68,6 +67,11 @@ function unionLeaves(lists: (CatLeaf[] | undefined)[]): CatLeaf[] {
 }
 
 export type Tab = "home" | "list" | "stats" | "import" | "more" | "books";
+
+export type RestoreTarget =
+  | { type: "new"; name: string; folder: string }
+  | { type: "existing"; ledgerId: string }
+  | { type: "skip" };
 
 type Composer = {
   amount: string;
@@ -140,10 +144,13 @@ type LedgerState = {
   remove: (id: string) => Promise<void>;
   removeMany: (ids: string[]) => Promise<void>;
   importFiles: (files: File[]) => Promise<void>;
-  restoreBackup: (file: File) => Promise<void>;
   exportBackup: () => void;
-  exportLedgerBackup: (id?: string) => void;
-  restoreLedgerBackup: (file: File) => Promise<void>;
+  pendingRestore: RestorePlan | null;
+  setPendingRestore: (plan: RestorePlan | null) => void;
+  applyRestore: (
+    plan: RestorePlan,
+    targets: Record<string, RestoreTarget>,
+  ) => Promise<void>;
   confirmImport: () => Promise<void>;
   cancelPreview: () => void;
   dismissSample: () => Promise<void>;
@@ -175,6 +182,16 @@ type LedgerState = {
 
 function sortTx(list: Tx[]): Tx[] {
   return [...list].sort((a, b) => b.time - a.time);
+}
+
+function uniqueLedgerName(ledgers: LedgerFile[], base: string): string {
+  const name = base.trim() || "恢复的账本";
+  if (!ledgers.some((l) => l.name === name)) return name;
+  const suffixed = `${name} 恢复`;
+  if (!ledgers.some((l) => l.name === suffixed)) return suffixed;
+  let i = 2;
+  while (ledgers.some((l) => l.name === `${suffixed} ${i}`)) i += 1;
+  return `${suffixed} ${i}`;
 }
 
 export function monthStats(txs: Tx[], month: string, cats: CatLeaf[] = DEFAULT_LEAVES) {
@@ -365,6 +382,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
   previewSource: null,
   previewSkipped: 0,
   usingSample: true,
+  pendingRestore: null,
   liveCapture: true,
   ingesting: false,
   wallpaper: null,
@@ -695,83 +713,113 @@ export const useLedger = create<LedgerState>((set, get) => ({
     toast.success("备份已保存");
   },
 
-  restoreBackup: async (file) => {
-    const pack = await parseLedgerPackFile(file);
-    if (pack) {
-      await get().restoreLedgerBackup(file);
-      return;
-    }
-    const snap = await parseSnapshotFile(file);
-    if (!snap) {
-      toast.error("这不是月梨备份文件");
-      return;
-    }
-    await applySnap(snap, set);
-    toast.success(`已恢复 ${snap.txs.length} 笔`);
-  },
+  setPendingRestore: (plan) => set({ pendingRestore: plan }),
 
-  exportLedgerBackup: (id) => {
-    const ledgerId = id ?? get().ledgerId;
-    const ledger = get().ledgers.find((l) => l.id === ledgerId);
-    if (!ledger) {
-      toast.message("没有这本账");
-      return;
-    }
-    const txs = get().txs.filter(
-      (t) => (t.ledgerId ?? DEFAULT_LEDGER_ID) === ledgerId && t.origin !== "sample",
-    );
-    downloadLedgerPack({
-      v: 1,
-      kind: "ledger-pack",
-      savedAt: Date.now(),
-      ledger,
-      txs,
-      accounts: get().accounts.filter((a) => (a.ledgerId ?? DEFAULT_LEDGER_ID) === ledgerId),
-      recurring: get().recurring.filter((r) => (r.ledgerId ?? DEFAULT_LEDGER_ID) === ledgerId),
-    });
-    toast.success(`已导出「${ledger.name}」`);
-  },
+  applyRestore: async (plan, targets) => {
+    const current = get();
+    const baseTxs = current.usingSample
+      ? current.txs.filter((t) => t.origin !== "sample")
+      : current.txs;
+    if (current.usingSample) await dbClearTx();
 
-  restoreLedgerBackup: async (file) => {
-    const pack = await parseLedgerPackFile(file);
-    if (!pack) {
-      toast.error("这不是单本账本备份");
+    const nextLedgers = [...current.ledgers];
+    const nextTxs = [...baseTxs];
+    const nextAccounts = [...current.accounts];
+    const nextRecurring = [...current.recurring];
+    const appliedLedgers = new Set<string>();
+    let firstTargetId: string | null = null;
+    let txCount = 0;
+    let accountCount = 0;
+    let recurringCount = 0;
+
+    for (const group of plan.groups) {
+      const target = targets[group.key];
+      if (!target || target.type === "skip") continue;
+
+      let ledgerId: string;
+      if (target.type === "existing") {
+        const existing = nextLedgers.find((l) => l.id === target.ledgerId);
+        if (!existing) continue;
+        ledgerId = existing.id;
+      } else {
+        const id = newId();
+        const name = uniqueLedgerName(nextLedgers, target.name);
+        nextLedgers.push({
+          id,
+          name,
+          folder: target.folder || group.folder || "其他",
+          createdAt: Date.now(),
+        });
+        ledgerId = id;
+      }
+      appliedLedgers.add(ledgerId);
+      if (!firstTargetId) firstTargetId = ledgerId;
+
+      const targetTxs = nextTxs.filter((t) => (t.ledgerId ?? DEFAULT_LEDGER_ID) === ledgerId);
+      for (const tx of group.txs) {
+        const row: Tx = {
+          ...tx,
+          id: newId(),
+          ledgerId,
+          origin: tx.origin === "sample" ? "manual" : tx.origin,
+        };
+        if (sameRecord(row, targetTxs)) continue;
+        targetTxs.push(row);
+        nextTxs.push(row);
+        txCount += 1;
+      }
+      for (const acc of group.accounts) {
+        nextAccounts.push({ ...acc, id: newId(), ledgerId });
+        accountCount += 1;
+      }
+      for (const rec of group.recurring) {
+        nextRecurring.push({ ...rec, id: newId(), ledgerId });
+        recurringCount += 1;
+      }
+    }
+
+    if (txCount === 0 && accountCount === 0 && recurringCount === 0) {
+      toast.message("没有恢复任何内容");
       return;
     }
-    const id = newId();
-    const taken = get().ledgers.some((l) => l.name === pack.ledger.name);
-    const ledger: LedgerFile = {
-      ...pack.ledger,
-      id,
-      name: taken ? `${pack.ledger.name} 恢复` : pack.ledger.name,
-      createdAt: Date.now(),
-    };
-    const txs = pack.txs.map((t) => ({
-      ...t,
-      id: newId(),
-      ledgerId: id,
-      origin: t.origin === "sample" ? ("manual" as const) : t.origin,
-    }));
-    const accounts = (pack.accounts ?? []).map((a) => ({ ...a, id: newId(), ledgerId: id }));
-    const recurring = (pack.recurring ?? []).map((r) => ({ ...r, id: newId(), ledgerId: id }));
-    const keepTxs = get().usingSample ? get().txs.filter((t) => t.origin !== "sample") : get().txs;
+
+    const nextCats = plan.cats?.length ? unionLeaves([current.cats, plan.cats]) : current.cats;
+    const targetId = firstTargetId ?? current.ledgerId;
     set({
-      ledgers: [...get().ledgers, ledger],
-      ledgerId: id,
-      txs: sortTx([...keepTxs, ...txs]),
-      accounts: [...get().accounts, ...accounts],
-      recurring: [...get().recurring, ...recurring],
+      txs: sortTx(nextTxs),
+      ledgers: nextLedgers,
+      accounts: nextAccounts,
+      recurring: nextRecurring,
+      cats: nextCats,
+      catBag: { main: nextCats, bills: nextCats },
       usingSample: false,
+      ledgerId: targetId,
+      wallpaper: plan.wallpaper !== undefined ? plan.wallpaper : current.wallpaper,
+      remindRecord: plan.remindRecord ?? current.remindRecord,
+      liveCapture: plan.liveCapture ?? current.liveCapture,
+      pendingRestore: null,
       tab: "books",
     });
+
     markUsed();
-    await dbSetMeta("ledgers", [...get().ledgers]);
-    await dbSetMeta("ledgerId", id);
-    await dbSetMeta("accounts", get().accounts);
-    await dbSetMeta("recurring", get().recurring);
     await dbSetMeta("usingSample", false);
-    if (txs.length) await dbPutMany(txs);
-    toast.success(`已恢复账本「${ledger.name}」${txs.length} 笔`);
+    await dbSetMeta("ledgers", nextLedgers);
+    await dbSetMeta("ledgerId", targetId);
+    await dbSetMeta("accounts", nextAccounts);
+    await dbSetMeta("recurring", nextRecurring);
+    await dbSetMeta("cats", nextCats);
+    if (plan.wallpaper !== undefined) await dbSetMeta("wallpaper", plan.wallpaper ?? "");
+    if (plan.remindRecord !== undefined) await dbSetMeta("remindRecord", plan.remindRecord);
+    if (plan.liveCapture !== undefined) await dbSetMeta("liveCapture", plan.liveCapture);
+    const newTxs = nextTxs.filter((t) => !current.txs.some((x) => x.id === t.id));
+    if (newTxs.length) await dbPutMany(newTxs);
+
+    const parts = [
+      `${txCount} 笔流水`,
+      accountCount ? `${accountCount} 个账户` : "",
+      recurringCount ? `${recurringCount} 条定期` : "",
+    ].filter(Boolean);
+    toast.success(`已恢复 ${parts.join("、")}，共 ${appliedLedgers.size} 本账`);
   },
 
   importFiles: async (files) => {
@@ -779,7 +827,9 @@ export const useLedger = create<LedgerState>((set, get) => ({
     if (accepted.length === 0) return;
     const backups = accepted.filter(isSnapshotFile);
     if (backups.length) {
-      await get().restoreBackup(backups[0]);
+      const plan = await parseRestoreFile(backups[0]);
+      if (plan) set({ pendingRestore: plan });
+      else toast.error("这不是月梨备份文件");
       return;
     }
     const merged: ParsedRow[] = [];

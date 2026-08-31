@@ -1,7 +1,7 @@
 import type { Tx } from "./ledger";
 import type { Account, KindDef, Recurring } from "./models";
 import type { CatLeaf } from "./categories";
-import type { LedgerFile } from "./ledgers";
+import { DEFAULT_LEDGER_ID, type LedgerFile } from "./ledgers";
 
 const KEY = "yueli-snapshot-v1";
 const USED = "yueli-used";
@@ -117,14 +117,122 @@ export function isLedgerPack(data: unknown): data is LedgerPack {
   return Boolean(row && row.v === 1 && row.kind === "ledger-pack" && row.ledger && Array.isArray(row.txs));
 }
 
-export function downloadLedgerPack(pack: LedgerPack) {
-  const blob = new Blob([JSON.stringify(pack)], { type: "application/json" });
-  const a = document.createElement("a");
-  const day = new Date(pack.savedAt).toISOString().slice(0, 10);
-  a.href = URL.createObjectURL(blob);
-  a.download = `月梨-${pack.ledger.name}-${day}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+/** One 账本 (or orphan bucket) inside a backup, ready for restore targeting. */
+export type RestoreGroup = {
+  /** Source ledger id (or "__orphan__" for rows whose 账本 is missing). */
+  key: string;
+  ledger: LedgerFile | null;
+  name: string;
+  folder: string;
+  txs: Tx[];
+  accounts: Account[];
+  recurring: Recurring[];
+};
+
+/** A parsed backup file, grouped per 账本 so the user can pick destinations. */
+export type RestorePlan = {
+  kind: "backup" | "ledger-pack";
+  savedAt: number;
+  groups: RestoreGroup[];
+  cats?: CatLeaf[];
+  kinds?: KindDef[];
+  wallpaper?: string | null;
+  remindRecord?: boolean;
+  liveCapture?: boolean;
+};
+
+/**
+ * Parse a backup file (整体备份 or 单账本备份) into per-账本 groups.
+ * Returns null when the file isn't a 月梨 backup or has nothing to restore.
+ */
+export async function parseRestoreFile(file: File): Promise<RestorePlan | null> {
+  let text: string;
+  try {
+    text = await file.text();
+  } catch {
+    return null;
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return null;
+  }
+
+  if (isLedgerPack(data)) {
+    return {
+      kind: "ledger-pack",
+      savedAt: data.savedAt ?? Date.now(),
+      groups: [
+        {
+          key: `pack-${data.ledger.id}`,
+          ledger: data.ledger,
+          name: data.ledger.name,
+          folder: data.ledger.folder || "其他",
+          txs: (data.txs ?? []).filter((t) => t.origin !== "sample"),
+          accounts: data.accounts ?? [],
+          recurring: data.recurring ?? [],
+        },
+      ],
+    };
+  }
+
+  const snap = data as Snapshot;
+  if (!snap || snap.v !== 1 || !Array.isArray(snap.txs)) return null;
+
+  const groups = new Map<string, RestoreGroup>();
+  for (const ledger of snap.ledgers ?? []) {
+    groups.set(ledger.id, {
+      key: ledger.id,
+      ledger,
+      name: ledger.name,
+      folder: ledger.folder || "其他",
+      txs: [],
+      accounts: [],
+      recurring: [],
+    });
+  }
+  const orphan: RestoreGroup = {
+    key: "__orphan__",
+    ledger: null,
+    name: "未分类流水",
+    folder: "其他",
+    txs: [],
+    accounts: [],
+    recurring: [],
+  };
+
+  const assign = <T extends { ledgerId?: string }>(
+    rows: T[],
+    push: (group: RestoreGroup, row: T) => void,
+  ) => {
+    for (const row of rows) {
+      const gid = row.ledgerId ?? DEFAULT_LEDGER_ID;
+      const group = groups.get(gid) ?? orphan;
+      push(group, row);
+    }
+  };
+  assign(snap.txs.filter((t) => t.origin !== "sample"), (g, t) => g.txs.push(t));
+  assign(snap.accounts ?? [], (g, a) => g.accounts.push(a));
+  assign(snap.recurring ?? [], (g, r) => g.recurring.push(r));
+
+  const visible = [...groups.values()];
+  if (orphan.txs.length || orphan.accounts.length || orphan.recurring.length) visible.push(orphan);
+  const meaningful = visible.filter(
+    (g) => g.txs.length || g.accounts.length || g.recurring.length,
+  );
+  if (meaningful.length === 0) return null;
+
+  return {
+    kind: "backup",
+    savedAt: snap.savedAt ?? Date.now(),
+    groups: meaningful,
+    cats: snap.cats,
+    kinds: snap.kinds,
+    wallpaper: snap.wallpaper,
+    remindRecord: snap.remindRecord,
+    liveCapture: snap.liveCapture,
+  };
 }
 
 export function downloadSnapshot(snap: Snapshot) {
@@ -135,28 +243,6 @@ export function downloadSnapshot(snap: Snapshot) {
   a.download = `月梨备份-${day}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-}
-
-export async function parseSnapshotFile(file: File): Promise<Snapshot | null> {
-  const text = await file.text();
-  try {
-    const data = JSON.parse(text) as Snapshot & { kind?: string };
-    if (data?.kind === "ledger-pack") return null;
-    if (data?.v !== 1 || !Array.isArray(data.txs)) return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export async function parseLedgerPackFile(file: File): Promise<LedgerPack | null> {
-  const text = await file.text();
-  try {
-    const data = JSON.parse(text) as unknown;
-    return isLedgerPack(data) ? data : null;
-  } catch {
-    return null;
-  }
 }
 
 export function isSnapshotFile(file: File) {

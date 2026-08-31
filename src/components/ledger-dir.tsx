@@ -18,8 +18,6 @@ export function BooksView() {
   const setLedgerFolder = useLedger((s) => s.setLedgerFolder);
   const removeLedger = useLedger((s) => s.removeLedger);
   const mergeLedgers = useLedger((s) => s.mergeLedgers);
-  const exportLedgerBackup = useLedger((s) => s.exportLedgerBackup);
-  const restoreLedgerBackup = useLedger((s) => s.restoreLedgerBackup);
   const setTab = useLedger((s) => s.setTab);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -86,25 +84,13 @@ export function BooksView() {
         <button
           type="button"
           className="h-10 flex-1 rounded-full bg-elevated text-sm text-fg shadow-[var(--shadow-border)]"
-          onClick={() => exportLedgerBackup(ledgerId)}
+          onClick={() => setTab("more")}
         >
-          导出当前账本
+          备份与恢复
         </button>
-        <label className="h-10 flex-1">
-          <input
-            type="file"
-            accept="application/json,.json"
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) void restoreLedgerBackup(file);
-            }}
-          />
-          <span className="flex h-10 w-full items-center justify-center rounded-full bg-elevated text-sm text-fg shadow-[var(--shadow-border)]">
-            恢复账本
-          </span>
-        </label>
+        <p className="flex h-10 flex-1 items-center justify-center rounded-full bg-elevated text-xs text-muted">
+          导出/恢复在「家当」
+        </p>
       </div>
 
       {adding ? (

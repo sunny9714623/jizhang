@@ -19,6 +19,7 @@ import { dueRecurring } from "@/lib/remind";
 import { useLedger } from "@/lib/ledger-store";
 import { cn } from "@/lib/utils";
 import { inLedger, txsInLedger } from "@/lib/ledgers";
+import { RestoreFileButton } from "@/components/restore-sheet";
 
 export function MoreView() {
   const remindRecord = useLedger((s) => s.remindRecord);
@@ -31,7 +32,6 @@ export function MoreView() {
   const kinds = useLedger((s) => s.kinds);
   const setRemindRecord = useLedger((s) => s.setRemindRecord);
   const exportBackup = useLedger((s) => s.exportBackup);
-  const restoreBackup = useLedger((s) => s.restoreBackup);
   const worth = netWorth(inLedger(accounts, ledgerId), kinds);
 
   return (
@@ -99,30 +99,19 @@ export function MoreView() {
       <section className="rounded-xl bg-elevated px-5 py-4 shadow-[var(--shadow-border)]">
         <p className="font-display text-xl text-fg">备份</p>
         <p className="mt-2 text-sm text-muted">
-          账本只存在这台手机。发布或换浏览器前，先导出备份；回来时点恢复。
+          备份包含全部账本、流水、资产和定期账单。换浏览器或换设备前先导出；恢复时每本账都可以选择并入哪本账。
         </p>
         <Button
           className="mt-3 w-full"
           type="button"
           onClick={() => exportBackup()}
         >
-          导出备份
+          导出备份（全部账本）
         </Button>
-        <label className="mt-2 block">
-          <input
-            type="file"
-            accept="application/json,.json"
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) void restoreBackup(file);
-            }}
-          />
-          <span className="flex h-11 w-full items-center justify-center rounded-full bg-surface text-sm text-fg shadow-[var(--shadow-border)]">
-            恢复备份
-          </span>
-        </label>
+        <RestoreFileButton
+          label="恢复备份"
+          className="mt-2 block h-11 bg-surface"
+        />
         <Button
           className="mt-3 w-full"
           type="button"

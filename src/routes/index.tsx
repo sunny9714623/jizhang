@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ChartColumn, Coins, LayoutGrid, MessageCircle, Plus, WalletCards } from "lucide-react";
 import { Toaster } from "sonner";
 import { Composer } from "@/components/composer";
+import { RestoreSheet } from "@/components/restore-sheet";
 import { ImportView } from "@/components/import-view";
 import { MoreView } from "@/components/more-view";
 import { Overview } from "@/components/overview";
@@ -175,6 +176,7 @@ function Home() {
 
         <TxDetail />
         <Composer />
+        <RestoreSheet />
         <Toaster
           theme="light"
           position="top-center"
