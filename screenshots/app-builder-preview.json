@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "月梨",
+      "hasCanvas": false,
+      "bodyTextLen": 375,
+      "bodyTextHash": "fdc87a3a12d74c171649e12b8ad723d29d0dce4fe607865ceedd6e6133a236ea",
+      "bodyTextPrefix": "月梨 月下把账看清 记一笔 到期账单 iCloud+ · 2天后 6.00 已付 2026年8月 本月支出 5,130.70 收",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "月梨",
+      "hasCanvas": false,
+      "bodyTextLen": 375,
+      "bodyTextHash": "fdc87a3a12d74c171649e12b8ad723d29d0dce4fe607865ceedd6e6133a236ea",
+      "bodyTextPrefix": "月梨 月下把账看清 记一笔 到期账单 iCloud+ · 2天后 6.00 已付 2026年8月 本月支出 5,130.70 收",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

@@ -1,0 +1,14 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+await page.goto("http://127.0.0.1:8080/", { waitUntil: "domcontentloaded", timeout: 15000 });
+await page.getByText("月梨").first().waitFor({ timeout: 10000 });
+await page.waitForTimeout(800);
+const yue = await page.getByRole("button", { name: "月色" }).count();
+const plus = await page.getByRole("button", { name: "用照片做背景" }).count();
+const off = await page.getByRole("button", { name: "去掉背景照片" }).count();
+const moon = await page.locator('img[src*="moon-pear"]').count();
+const attr = await page.locator("[data-wallpaper]").getAttribute("data-wallpaper");
+console.log({ yue, plus, off, moon, attr });
+await page.screenshot({ path: "/workspace/screenshots/qa-plain.png" });
+await browser.close();

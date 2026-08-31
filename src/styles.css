@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #e8e2d6;
+  --color-surface: #f3eee6;
+  --color-elevated: #fbf7f0;
+  --color-fg: #1c1917;
+  --color-muted: #7a736c;
+  --color-subtle: #a39b92;
+  --color-primary: #5e7a5c;
+  --color-primary-fg: #fbf7f0;
+  --color-border: #ddd4c6;
+  --color-danger: #9f2d2d;
+  --color-overlay: #1c191799;
+  --color-income: #2f5d50;
+  --color-seal: #5e7a5c;
+  --color-wash: rgb(28 25 23 / 0.18);
+
+  --font-sans: "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Noto Serif SC", ui-serif, "Songti SC", serif;
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  --shadow-border: 0 0 0 1px rgb(28 25 23 / 0.08);
+  --shadow-border-hover: 0 0 0 1px rgb(28 25 23 / 0.16);
+  --shadow-sheet: 0 -12px 40px rgb(28 25 23 / 0.12);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+    overflow: hidden;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+    touch-action: auto;
+    -webkit-user-select: text;
+    user-select: text;
+    pointer-events: auto;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    letter-spacing: 0.01em;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    font-family: var(--font-display);
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: var(--color-primary);
+    color: var(--color-primary-fg);
+  }
+}
+
+@keyframes ledger-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ledger-enter {
+  animation: ledger-enter 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ledger-enter {
+    animation: none;
+  }
+}
+
+[data-wallpaper="on"] {
+  --color-bg: transparent;
+  --color-surface: rgb(243 238 230 / 0.52);
+  --color-elevated: rgb(251 247 240 / 0.68);
+}
+
+[data-wallpaper="on"] .frost,
+[data-wallpaper="on"] .bg-surface,
+[data-wallpaper="on"] .bg-elevated {
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
