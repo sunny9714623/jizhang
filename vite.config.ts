@@ -12,6 +12,17 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
 
+/**
+ * Base path for GitHub Pages project sites (https://<user>.github.io/<repo>/).
+ * The workflow sets VITE_BASE_PATH from the repository name; a user/org site
+ * (https://<user>.github.io/) resolves to "/". The dev server always runs at
+ * "/" regardless.
+ */
+const githubPagesBase = process.env.VITE_BASE_PATH ?? "/jizhang/";
+
+/** `NITRO_PRESET=vercel` restores the Vercel server build (`.output/`). */
+const isVercelBuild = process.env.NITRO_PRESET === "vercel";
+
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
   try {
@@ -146,6 +157,7 @@ function authPopupPlugin(): Plugin {
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
+  base: command === "build" || isPreview ? githubPagesBase : "/",
   server: {
     host: "0.0.0.0",
     port: 8080,
@@ -166,17 +178,24 @@ export default defineConfig(({ command, isPreview }) => ({
     // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
     grokPwaPlugin(),
     tailwindcss(),
-    tanstackStart(),
+    tanstackStart({
+      // Static GitHub Pages builds prerender `/` to HTML via the framework's
+      // own prerenderer; the Nitro server build (Vercel) does not prerender.
+      prerender: isVercelBuild ? undefined : { enabled: true },
+    }),
     ...(command === "build" || isPreview
-      ? [
-          nitro({
-            preset: "vercel",
-            // Auto-registers server/middleware/* (the PWA install page +
-            // manifest + head-tag middleware). Nitro v3 defaults serverDir to
-            // false, so removing this silently unwires /?install=1 on deploys.
-            serverDir: "./server",
-          }),
-        ]
+      ? isVercelBuild
+        ? [
+            nitro({
+              preset: "vercel",
+              // Auto-registers server/middleware/* (the PWA install page +
+              // manifest + head-tag middleware). Nitro v3 defaults serverDir
+              // to false, so removing this silently unwires /?install=1 on
+              // Vercel deploys.
+              serverDir: "./server",
+            }),
+          ]
+        : []
       : []),
     viteReact(),
   ],

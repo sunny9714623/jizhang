@@ -1,4 +1,8 @@
 node_modules/
+.output/
+dist/
+screenshots/
+.idea/
 .project_id
 .github_repo
 .env
