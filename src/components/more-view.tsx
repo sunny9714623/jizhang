@@ -182,41 +182,58 @@ function AccountList() {
   const upsert = useLedger((s) => s.upsertAccount);
   const remove = useLedger((s) => s.removeAccount);
   const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
   return (
     <section>
       <div className="mb-3 flex items-baseline justify-between px-1">
         <h2 className="font-display text-xl text-fg">资产与借贷</h2>
         <button type="button" className="text-sm text-muted" onClick={() => setOpen((v) => !v)}>
-          {open ? "收起" : "记一笔账户"}
+          {open ? "收起" : `展开 · ${accounts.length} 项`}
         </button>
       </div>
-      <KindTags />
-      {open ? <AccountForm onSave={(row) => { void upsert(row); setOpen(false); }} /> : null}
-      <ul className="overflow-hidden rounded-lg bg-elevated shadow-[var(--shadow-border)]">
-        {accounts.map((a, i) => {
-          const kind = findKind(a.kind, kinds);
-          const asset = isAssetKind(a.kind, kinds);
-          return (
-          <li key={a.id} className={cn("flex items-center gap-3 px-4 py-3", i > 0 && "border-t border-border")}>
-            <span className="text-lg">{kind?.emoji ?? "•"}</span>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm text-fg">{a.name}</p>
-              <p className="text-xs text-muted">
-                {kindLabel(a.kind, kinds)}
-                {a.counterparty ? ` · ${a.counterparty}` : ""}
-              </p>
-            </div>
-            <span className={cn("text-sm tabular-nums", asset ? "text-income" : "text-fg")}>
-              {asset ? "" : "−"}
-              {formatYuan(a.balanceFen)}
-            </span>
-            <button type="button" className="text-xs text-subtle" onClick={() => void remove(a.id)}>
-              删
+      {open ? (
+        <>
+          <KindTags />
+          <div className="mb-3 flex justify-end">
+            <button type="button" className="text-sm text-muted" onClick={() => setAdding((v) => !v)}>
+              {adding ? "收起记一笔账户" : "记一笔账户"}
             </button>
-          </li>
-          );
-        })}
-      </ul>
+          </div>
+          {adding ? (
+            <AccountForm
+              onSave={(row) => {
+                void upsert(row);
+                setAdding(false);
+              }}
+            />
+          ) : null}
+          <ul className="overflow-hidden rounded-lg bg-elevated shadow-[var(--shadow-border)]">
+            {accounts.map((a, i) => {
+              const kind = findKind(a.kind, kinds);
+              const asset = isAssetKind(a.kind, kinds);
+              return (
+                <li key={a.id} className={cn("flex items-center gap-3 px-4 py-3", i > 0 && "border-t border-border")}>
+                  <span className="text-lg">{kind?.emoji ?? "•"}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-fg">{a.name}</p>
+                    <p className="text-xs text-muted">
+                      {kindLabel(a.kind, kinds)}
+                      {a.counterparty ? ` · ${a.counterparty}` : ""}
+                    </p>
+                  </div>
+                  <span className={cn("text-sm tabular-nums", asset ? "text-income" : "text-fg")}>
+                    {asset ? "" : "−"}
+                    {formatYuan(a.balanceFen)}
+                  </span>
+                  <button type="button" className="text-xs text-subtle" onClick={() => void remove(a.id)}>
+                    删
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      ) : null}
     </section>
   );
 }

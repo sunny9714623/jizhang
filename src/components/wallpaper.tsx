@@ -83,7 +83,7 @@ export function WallpaperControls() {
         type="button"
         variant="ghost"
         size="icon"
-        className={light ? "text-primary-fg hover:bg-elevated/50" : undefined}
+        className={cn("shrink-0", light ? "text-primary-fg hover:bg-elevated/50" : undefined)}
         aria-label="更换背景"
         onClick={() => setOpen(true)}
       >

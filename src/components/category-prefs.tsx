@@ -21,7 +21,7 @@ export function CategoryPrefs() {
               type="button"
               onClick={() => {
                 setSide(d);
-                setOpen(d === "income" ? "earn" : "life");
+                setOpen("");
               }}
               className={cn(
                 "h-8 rounded-full px-3 text-xs",

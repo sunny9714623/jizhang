@@ -145,7 +145,7 @@ function Home() {
           <div className="min-w-0 flex-1">
             <button
               type="button"
-              className="min-w-0 text-left"
+              className="block w-full min-w-0 text-left"
               onClick={() => setTab("books")}
             >
               <p className={cn("truncate font-display text-3xl leading-none", lightTitle ? "text-primary-fg" : "text-fg")}>
@@ -162,13 +162,13 @@ function Home() {
             variant="ghost"
             size="icon"
             aria-label={dark ? "切换浅色模式" : "切换深色模式"}
-            className={lightTitle ? "text-primary-fg hover:bg-elevated/50" : undefined}
+            className={cn("shrink-0", lightTitle ? "text-primary-fg hover:bg-elevated/50" : undefined)}
             onClick={toggleDark}
           >
             {dark ? <Sun /> : <Moon />}
           </Button>
           {tab !== "import" && tab !== "books" ? (
-            <Button size="sm" onClick={openComposer}>
+            <Button size="sm" className="shrink-0" onClick={openComposer}>
               <Plus />
               记一笔
             </Button>
