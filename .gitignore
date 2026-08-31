@@ -7,3 +7,4 @@ screenshots/
 .github_repo
 .env
 .env.*
+.vercel/
