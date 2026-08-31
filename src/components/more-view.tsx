@@ -36,7 +36,7 @@ export function MoreView() {
   const kinds = useLedger((s) => s.kinds);
   const setRemindRecord = useLedger((s) => s.setRemindRecord);
   const exportBackup = useLedger((s) => s.exportBackup);
-  const worth = netWorth(accounts, kinds);
+  const worth = netWorth(inLedger(accounts, ledgerId), kinds);
 
   useEffect(() => {
     if (typeof Notification === "undefined") {
@@ -176,8 +176,9 @@ export function MoreView() {
 
 function AccountList() {
   const all = useLedger((s) => s.accounts);
+  const ledgerId = useLedger((s) => s.ledgerId);
   const kinds = useLedger((s) => s.kinds);
-  const accounts = all;
+  const accounts = inLedger(all, ledgerId);
   const upsert = useLedger((s) => s.upsertAccount);
   const remove = useLedger((s) => s.removeAccount);
   const [open, setOpen] = useState(false);
@@ -187,7 +188,7 @@ function AccountList() {
       <div className="mb-3 flex items-baseline justify-between px-1">
         <h2 className="font-display text-xl text-fg">资产与借贷</h2>
         <button type="button" className="text-sm text-muted" onClick={() => setOpen((v) => !v)}>
-          {open ? "收起" : `展开 · ${accounts.length} 项`}
+          {open ? "收起" : "展开"}
         </button>
       </div>
       {open ? (
