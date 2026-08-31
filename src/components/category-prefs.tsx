@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 export function CategoryPrefs() {
   const [side, setSide] = useState<"expense" | "income">("expense");
   const groups = groupsFor(side);
-  const [open, setOpen] = useState<string>(groups[0]?.id ?? "life");
+  const [open, setOpen] = useState<string>("");
 
   return (
     <section>

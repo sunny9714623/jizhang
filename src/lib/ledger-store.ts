@@ -115,6 +115,7 @@ type LedgerState = {
   usingSample: boolean;
   liveCapture: boolean;
   dark: boolean;
+  notifications: boolean;
   ingesting: boolean;
   wallpaper: string | null;
   recurring: Recurring[];
@@ -178,6 +179,7 @@ type LedgerState = {
   upsertAccount: (row: Account) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
   setRemindRecord: (on: boolean) => Promise<void>;
+  setNotifications: (on: boolean) => Promise<void>;
   toggleDark: () => void;
   upsertCat: (row: CatLeaf) => Promise<void>;
   removeCat: (id: string) => Promise<void>;
@@ -397,6 +399,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
   pendingRestore: null,
   liveCapture: true,
   dark: false,
+  notifications: true,
   ingesting: false,
   wallpaper: null,
   recurring: SAMPLE_RECURRING,
@@ -416,10 +419,11 @@ export const useLedger = create<LedgerState>((set, get) => ({
       await requestPersist();
       const rows = await dbListTx();
       const dark = (await dbGetMeta<boolean>("dark")) ?? false;
+      const notifications = (await dbGetMeta<boolean>("notifications")) ?? true;
       const snap = rows.length === 0 ? readSnapshot() : null;
       if (rows.length === 0 && snap && snap.txs.some((t) => t.origin !== "sample")) {
         await applySnap(snap, set);
-        set({ dark });
+        set({ dark, notifications });
         toast.message(`已从本地备份恢复 ${snap.txs.length} 笔`);
         return;
       }
@@ -478,6 +482,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
           usingSample: usingSample && rows.every((r) => r.origin === "sample"),
           liveCapture,
           dark,
+          notifications,
           wallpaper,
           recurring: rec,
           accounts: acc,
@@ -497,6 +502,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
           usingSample: false,
           liveCapture,
           dark,
+          notifications,
           wallpaper,
           recurring: rec.filter((r) => !r.id.startsWith("sample")),
           accounts: acc.filter((a) => !isSampleAccount(a)),
@@ -516,6 +522,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
         set({
           liveCapture,
           dark,
+          notifications,
           wallpaper,
           recurring: SAMPLE_RECURRING,
           accounts: SAMPLE_ACCOUNTS,
@@ -1155,6 +1162,11 @@ export const useLedger = create<LedgerState>((set, get) => ({
   setRemindRecord: async (on) => {
     set({ remindRecord: on });
     await dbSetMeta("remindRecord", on);
+  },
+
+  setNotifications: async (on) => {
+    set({ notifications: on });
+    await dbSetMeta("notifications", on);
   },
 
   toggleDark: () => {

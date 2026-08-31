@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { downloadLedgerCsv } from "@/lib/export-csv";
 import { newId, formatYuan, formatSignedYuan } from "@/lib/ledger";
@@ -22,7 +23,10 @@ import { inLedger, txsInLedger } from "@/lib/ledgers";
 import { RestoreFileButton } from "@/components/restore-sheet";
 
 export function MoreView() {
+  const [perm, setPerm] = useState<NotificationPermission | "unsupported">("default");
   const remindRecord = useLedger((s) => s.remindRecord);
+  const notifications = useLedger((s) => s.notifications);
+  const setNotifications = useLedger((s) => s.setNotifications);
   const accounts = useLedger((s) => s.accounts);
   const recurring = useLedger((s) => s.recurring);
   const txs = useLedger((s) => s.txs);
@@ -33,6 +37,30 @@ export function MoreView() {
   const setRemindRecord = useLedger((s) => s.setRemindRecord);
   const exportBackup = useLedger((s) => s.exportBackup);
   const worth = netWorth(inLedger(accounts, ledgerId), kinds);
+
+  useEffect(() => {
+    if (typeof Notification === "undefined") {
+      setPerm("unsupported");
+      return;
+    }
+    setPerm(Notification.permission);
+  }, []);
+
+  const askPermission = () => {
+    if (typeof Notification === "undefined") {
+      toast.message("当前浏览器不支持系统通知");
+      return;
+    }
+    void Notification.requestPermission().then((p) => {
+      setPerm(p);
+      if (p === "granted") {
+        void setNotifications(true);
+        new Notification("月梨", { body: "提醒已打开。到期账单会在打开应用时通知。" });
+      } else {
+        toast.message("未获得通知权限，可在浏览器设置中允许后重试");
+      }
+    });
+  };
 
   return (
     <div className="flex flex-col gap-5 pb-8">
@@ -81,14 +109,28 @@ export function MoreView() {
           type="button"
           variant="secondary"
           className="mt-3 w-full"
-          onClick={() => {
-            void Notification.requestPermission().then((p) => {
-              if (p === "granted") new Notification("月梨", { body: "提醒已打开。到期账单会在打开应用时通知。" });
-            });
-          }}
+          onClick={
+            perm === "granted"
+              ? () => void setNotifications(!notifications)
+              : askPermission
+          }
         >
-          打开系统通知
+          {perm === "granted"
+            ? notifications
+              ? "关闭系统通知"
+              : "打开系统通知"
+            : "打开系统通知"}
         </Button>
+        {perm === "granted" && !notifications ? (
+          <p className="mt-2 text-sm text-muted">
+            系统通知已关闭，到期提醒不再弹出。浏览器权限仍保留，彻底关闭请到浏览器设置里操作。
+          </p>
+        ) : null}
+        {perm === "denied" ? (
+          <p className="mt-2 text-sm text-muted">
+            通知权限被浏览器拒绝，请在浏览器设置中允许月梨后重试。
+          </p>
+        ) : null}
         {dueRecurring(inLedger(recurring, ledgerId)).length ? (
           <p className="mt-3 text-sm text-muted">
             即将到期：{dueRecurring(inLedger(recurring, ledgerId)).map((r) => r.title).join("、")}

@@ -32,6 +32,7 @@ function Home() {
   const ledgers = useLedger((s) => s.ledgers);
   const txs = txsInLedger(txsAll, ledgerId);
   const recurring = inLedger(recurringAll, ledgerId);
+  const notifications = useLedger((s) => s.notifications);
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
@@ -47,11 +48,12 @@ function Home() {
   }, []);
 
   useEffect(() => {
+    if (!notifications) return;
     fireDueNotifications({
       due: dueRecurring(recurring),
       needRecord: !usingSample && !recordedToday(txs),
     });
-  }, [recurring, txs, usingSample]);
+  }, [recurring, txs, usingSample, notifications]);
 
   useEffect(() => {
     const hasFiles = (e: DragEvent) => e.dataTransfer?.types?.includes("Files") ?? false;
