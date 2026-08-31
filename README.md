@@ -20,7 +20,7 @@ npm run dev
 3. 推送代码后，在 **Actions** 页面可以看到 `Deploy to GitHub Pages` 自动运行；也可以手动点击 **Run workflow** 触发。
 4. 部署完成后访问 `https://<你的用户名>.github.io/<仓库名>/`。
 
-构建时 `VITE_BASE_PATH` 会按仓库名自动生成（`/<仓库名>/`）；如果仓库是用户主页（`<用户名>.github.io`），会自动使用 `/`，无需改代码。
+构建时设 `VITE_PAGES=1`，`VITE_BASE_PATH` 会按仓库名自动生成（`/<仓库名>/`）。Grok 发布（`*.grok.me`）使用根路径 `/`，不要用 Pages 的子路径。
 
 ## 本地验证 Pages 产物
 

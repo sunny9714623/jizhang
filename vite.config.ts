@@ -14,14 +14,15 @@ import { isMigrationFile } from "./scripts/migration-plan.mjs";
 
 /**
  * Base path for GitHub Pages project sites (https://<user>.github.io/<repo>/).
- * The workflow sets VITE_BASE_PATH from the repository name; a user/org site
- * (https://<user>.github.io/) resolves to "/". The dev server always runs at
- * "/" regardless.
+ * Set VITE_PAGES=1 and VITE_BASE_PATH=/<repo>/ in the Pages workflow.
+ * Grok.me / Vercel deploys must stay at "/" — a leftover /jizhang/ base 404s
+ * https://jizhang.grok.me because assets and routes resolve under /jizhang/.
  */
-const githubPagesBase = process.env.VITE_BASE_PATH ?? "/jizhang/";
+const isPagesBuild = process.env.VITE_PAGES === "1";
+const githubPagesBase = process.env.VITE_BASE_PATH ?? (isPagesBuild ? "/jizhang/" : "/");
 
-/** `NITRO_PRESET=vercel` restores the Vercel server build (`.output/`). */
-const isVercelBuild = process.env.NITRO_PRESET === "vercel";
+/** `NITRO_PRESET=static` (or VITE_PAGES=1) skips the Vercel server build. */
+const isVercelBuild = !isPagesBuild && process.env.NITRO_PRESET !== "static";
 
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
