@@ -671,24 +671,24 @@ export const useLedger = create<LedgerState>((set, get) => ({
     const tx = get().txs.find((t) => t.id === id);
     if (!tx) return;
     const merchant = patch.merchant !== undefined ? patch.merchant.trim() : tx.merchant;
-    if (patch.merchant !== undefined && !merchant) {
-      toast.message("商家不能为空");
-      return;
-    }
-    if (patch.amountFen !== undefined && (!Number.isInteger(patch.amountFen) || patch.amountFen <= 0)) {
-      toast.message("金额需大于 0");
-      return;
-    }
+    // 历史数据可能缺少商家或金额异常：空商家回退占位，金额非法时保留原值，
+    // 都不阻断其它字段的修改。
+    const amountFen =
+      patch.amountFen !== undefined &&
+      Number.isInteger(patch.amountFen) &&
+      patch.amountFen > 0
+        ? patch.amountFen
+        : undefined;
     const next = {
       ...tx,
-      merchant: merchant || tx.merchant,
+      merchant: merchant || "未注明对方",
       time: patch.time ?? tx.time,
       method: patch.method !== undefined ? patch.method.trim() : tx.method,
       note: patch.note !== undefined ? patch.note.trim() : tx.note,
-      amountFen: patch.amountFen ?? tx.amountFen,
+      amountFen: amountFen ?? tx.amountFen,
     };
     // 账户联动流水：同步调整对应账户余额，保持净资产一致。
-    if (patch.amountFen !== undefined) {
+    if (amountFen !== undefined) {
       const account = get().accounts.find((a) => accountTxId(a.id) === tx.id);
       if (account) {
         const oldSigned = tx.direction === "expense" ? -tx.amountFen : tx.amountFen;

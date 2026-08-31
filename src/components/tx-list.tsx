@@ -423,7 +423,6 @@ function CatPick({ tx, locked }: { tx: Tx; locked?: boolean }) {
 
 export function TxDetail() {
   const id = useLedger((s) => s.selectedId);
-  const tab = useLedger((s) => s.tab);
   const txs = useLedger((s) => s.txs);
   const select = useLedger((s) => s.select);
   const remove = useLedger((s) => s.remove);
@@ -441,9 +440,10 @@ export function TxDetail() {
     setMethod(tx.method);
     setNote(tx.note);
     setAmount((tx.amountFen / 100).toFixed(2));
-  }, [tx?.id]);
+  }, [tx?.id, tx?.merchant, tx?.time, tx?.method, tx?.note, tx?.amountFen]);
   if (!tx) return null;
-  const canEdit = tab === "list";
+  // 从首页、统计或流水列表打开都可以编辑，保证历史数据也能修改。
+  const canEdit = true;
   const dirty =
     merchant.trim() !== tx.merchant ||
     day !== shanghaiDayValue(tx.time) ||
