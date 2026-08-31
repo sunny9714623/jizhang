@@ -453,14 +453,14 @@ export function TxDetail() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-overlay md:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-overlay overscroll-x-contain md:items-center"
       onClick={() => select(null)}
     >
       <div
-        className="flex max-h-[88dvh] w-full max-w-md flex-col rounded-t-xl bg-surface shadow-[var(--shadow-sheet)] md:rounded-xl"
+        className="flex max-h-[88dvh] w-full max-w-md touch-pan-y flex-col overflow-x-hidden rounded-t-xl bg-surface shadow-[var(--shadow-sheet)] md:rounded-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-5">
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pt-5">
           {canEdit ? (
             <label className="block">
               <span className="text-xs text-muted">日期</span>
@@ -468,7 +468,7 @@ export function TxDetail() {
                 type="date"
                 value={day}
                 onChange={(e) => setDay(e.target.value)}
-                className="mt-1 h-11 w-full rounded-md bg-elevated px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+                className="mt-1 h-11 min-w-0 w-full appearance-none rounded-md bg-elevated px-3 text-sm text-fg shadow-[var(--shadow-border)]"
               />
             </label>
           ) : (

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { ChartColumn, Coins, LayoutGrid, MessageCircle, Plus, WalletCards } from "lucide-react";
+import { ChartColumn, Coins, LayoutGrid, MessageCircle, Moon, Plus, Sun, WalletCards } from "lucide-react";
 import { Toaster } from "sonner";
 import { Composer } from "@/components/composer";
 import { RestoreSheet } from "@/components/restore-sheet";
@@ -101,8 +101,14 @@ function Home() {
   const month = useLedger((s) => s.month);
   const openComposer = useLedger((s) => s.openComposer);
   const wallpaper = useLedger((s) => s.wallpaper);
+  const dark = useLedger((s) => s.dark);
+  const toggleDark = useLedger((s) => s.toggleDark);
   const photoWall = isPhotoWall(wallpaper);
   const lightTitle = wallNeedsLightText(wallpaper);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+  }, [dark]);
 
   return (
     <div
@@ -149,6 +155,16 @@ function Home() {
             </p>
           </div>
           <WallpaperControls />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={dark ? "切换浅色模式" : "切换深色模式"}
+            className={lightTitle ? "text-primary-fg hover:bg-elevated/50" : undefined}
+            onClick={toggleDark}
+          >
+            {dark ? <Sun /> : <Moon />}
+          </Button>
           {tab !== "import" && tab !== "books" ? (
             <Button size="sm" onClick={openComposer}>
               <Plus />

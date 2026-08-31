@@ -30,6 +30,31 @@
   --shadow-sheet: 0 -12px 40px rgb(28 25 23 / 0.12);
 }
 
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+  --color-bg: #17150f;
+  --color-surface: #211e17;
+  --color-elevated: #2b271e;
+  --color-fg: #ece3d3;
+  --color-muted: #a79c8a;
+  --color-subtle: #7f7563;
+  --color-primary: #93ad86;
+  --color-primary-fg: #17150f;
+  --color-border: #3b3529;
+  --color-danger: #d97b6b;
+  --color-overlay: #000000a6;
+  --color-income: #8bc0ab;
+  --color-seal: #93ad86;
+  --color-wash: rgb(0 0 0 / 0.4);
+  --shadow-border: 0 0 0 1px rgb(255 255 255 / 0.08);
+  --shadow-border-hover: 0 0 0 1px rgb(255 255 255 / 0.16);
+  --shadow-sheet: 0 -12px 40px rgb(0 0 0 / 0.55);
+}
+
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;
@@ -113,6 +138,11 @@
   --color-bg: transparent;
   --color-surface: rgb(243 238 230 / 0.52);
   --color-elevated: rgb(251 247 240 / 0.68);
+}
+
+.dark[data-wallpaper="on"] {
+  --color-surface: rgb(33 30 23 / 0.58);
+  --color-elevated: rgb(43 39 30 / 0.72);
 }
 
 [data-wallpaper="on"] .frost,

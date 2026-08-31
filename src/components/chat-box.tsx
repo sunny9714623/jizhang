@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { formatYuan } from "@/lib/ledger";
-import { leafLabel } from "@/lib/categories";
+import { leafLabel, type CatLeaf } from "@/lib/categories";
 import { parseChatBooks, type ChatDraft } from "@/lib/parse-chat";
 import { useLedger } from "@/lib/ledger-store";
 import { Button } from "@/components/ui/button";
@@ -19,6 +18,7 @@ export function ChatBox() {
   const recordMany = useLedger((s) => s.recordMany);
   const cats = useLedger((s) => s.cats);
   const [text, setText] = useState("");
+  const [edits, setEdits] = useState<Record<string, ChatDraft>>({});
   const [msgs, setMsgs] = useState<Msg[]>([
     {
       id: "hello",
@@ -67,18 +67,30 @@ export function ChatBox() {
         {msgs.map((m) =>
           m.role === "drafts" ? (
             <div key={m.id} className="rounded-lg bg-surface px-3 py-3 shadow-[var(--shadow-border)]">
-              <ul className="flex flex-col gap-2">
-                {m.drafts.map((d, i) => (
-                  <li key={`${d.merchant}-${i}`} className="text-sm">
-                    <p className="text-fg">
-                      {leafLabel(cats, d.category)}
-                      {d.direction === "income" ? "收入" : "支出"} {formatYuan(d.amountFen)}
-                    </p>
-                    <p className="text-xs text-muted">描述：{d.merchant}</p>
-                  </li>
-                ))}
+              <ul className="flex flex-col gap-3">
+                {m.drafts.map((d, i) => {
+                  const key = `${m.id}-${i}`;
+                  return (
+                    <li key={key}>
+                      <DraftCard
+                        draft={edits[key] ?? d}
+                        cats={cats}
+                        onChange={(next) => setEdits((prev) => ({ ...prev, [key]: next }))}
+                      />
+                    </li>
+                  );
+                })}
               </ul>
-              <Button type="button" className="mt-3 w-full" onClick={() => void confirm(m.drafts, m.id)}>
+              <Button
+                type="button"
+                className="mt-3 w-full"
+                onClick={() =>
+                  void confirm(
+                    m.drafts.map((d, i) => edits[`${m.id}-${i}`] ?? d),
+                    m.id,
+                  )
+                }
+              >
                 记下{m.drafts.length > 1 ? ` ${m.drafts.length} 笔` : ""}
               </Button>
             </div>
@@ -111,5 +123,70 @@ export function ChatBox() {
         <Button type="submit">发送</Button>
       </form>
     </section>
+  );
+}
+
+function DraftCard({
+  draft,
+  cats,
+  onChange,
+}: {
+  draft: ChatDraft;
+  cats: CatLeaf[];
+  onChange: (next: ChatDraft) => void;
+}) {
+  const [amount, setAmount] = useState((draft.amountFen / 100).toFixed(2));
+  const [merchant, setMerchant] = useState(draft.merchant);
+  const [note, setNote] = useState(draft.note);
+  const sync = (amountV: string, merchantV: string, noteV: string) => {
+    const fen = Math.round(Number.parseFloat(amountV) * 100);
+    onChange({
+      ...draft,
+      amountFen: Number.isFinite(fen) && fen > 0 ? fen : draft.amountFen,
+      merchant: merchantV.trim() || draft.merchant,
+      note: noteV,
+    });
+  };
+  return (
+    <div className="rounded-lg bg-elevated px-3 py-3 shadow-[var(--shadow-border)]">
+      <p className="text-sm text-fg">
+        {leafLabel(cats, draft.category)}
+        {draft.direction === "income" ? "收入" : "支出"}
+      </p>
+      <label className="mt-2 block">
+        <span className="text-xs text-muted">金额（元）</span>
+        <input
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            sync(e.target.value, merchant, note);
+          }}
+          className="mt-1 h-10 w-full rounded-md bg-surface px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+        />
+      </label>
+      <label className="mt-2 block">
+        <span className="text-xs text-muted">商家</span>
+        <input
+          value={merchant}
+          onChange={(e) => {
+            setMerchant(e.target.value);
+            sync(amount, e.target.value, note);
+          }}
+          className="mt-1 h-10 w-full rounded-md bg-surface px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+        />
+      </label>
+      <label className="mt-2 block">
+        <span className="text-xs text-muted">备注</span>
+        <input
+          value={note}
+          onChange={(e) => {
+            setNote(e.target.value);
+            sync(amount, merchant, e.target.value);
+          }}
+          className="mt-1 h-10 w-full rounded-md bg-surface px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+        />
+      </label>
+    </div>
   );
 }
