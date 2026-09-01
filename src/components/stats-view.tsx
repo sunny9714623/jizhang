@@ -19,6 +19,15 @@ function pad(n: number) {
   return String(n).padStart(2, "0");
 }
 
+function chartValue(fen: number): string {
+  const sign = fen < 0 ? "-" : "";
+  const yuan = Math.abs(fen) / 100;
+  if (yuan >= 10000) return `${sign}${(yuan / 10000).toFixed(1)}万`;
+  if (yuan >= 1000) return `${sign}${(yuan / 1000).toFixed(1)}千`;
+  if (yuan >= 100) return `${sign}${Math.round(yuan)}`;
+  return `${sign}${yuan.toFixed(yuan % 1 === 0 ? 0 : 1)}`;
+}
+
 function seriesFor(txs: Tx[], span: Span, year: string, month: string): Point[] {
   if (span === "day") {
     const days = new Date(Number(year), Number(month), 0).getDate();
@@ -162,7 +171,7 @@ export function StatsView() {
   return (
     <div className="flex flex-col gap-5 pb-8">
       <section className="rounded-xl bg-elevated px-4 py-4 shadow-[var(--shadow-border)]">
-        <div className="flex rounded-full bg-surface p-0.5 shadow-[var(--shadow-border)]">
+        <div className="mx-auto flex w-fit rounded-full bg-surface p-0.5 shadow-[var(--shadow-border)]">
           {(
             [
               ["day", "每日趋势"],
@@ -175,7 +184,7 @@ export function StatsView() {
               type="button"
               onClick={() => setSpan(id)}
               className={cn(
-                "h-9 flex-1 rounded-full text-xs",
+                "h-9 whitespace-nowrap rounded-full px-4 text-xs",
                 span === id ? "bg-primary text-primary-fg" : "text-muted",
               )}
             >
@@ -236,7 +245,7 @@ export function StatsView() {
             <ChevronRight className="size-5" />
           </button>
         </div>
-        <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
+        <div className="mx-auto mt-2 grid w-fit grid-cols-3 gap-4 text-center text-xs">
           <div>
             <p className="text-muted">{period}支出</p>
             <p className="font-display text-base tabular-nums text-fg">{formatYuan(sumExp)}</p>
@@ -373,7 +382,7 @@ function MoneyChart({
   const h = 188;
   const padL = 8;
   const padR = 8;
-  const padT = 8;
+  const padT = 32;
   const padB = 28;
   const innerH = h - padT - padB;
   const n = points.length || 1;
@@ -397,17 +406,32 @@ function MoneyChart({
             const cx = padL + i * slot;
             const bar = (v: number, color: string, off: number) => {
               const bh = (Math.abs(v) / max) * innerH;
+              const bx = cx + off;
+              const by = padT + innerH - bh;
               return (
-                <rect
-                  key={color}
-                  x={cx + off}
-                  y={padT + innerH - bh}
-                  width={bw}
-                  height={Math.max(0.5, bh)}
-                  fill={color}
-                  rx="0.6"
-                  opacity={activeKey && p.key !== activeKey ? 0.35 : 1}
-                />
+                <g key={color}>
+                  <rect
+                    x={bx}
+                    y={by}
+                    width={bw}
+                    height={Math.max(0.5, bh)}
+                    fill={color}
+                    rx="0.6"
+                    opacity={activeKey && p.key !== activeKey ? 0.35 : 1}
+                  />
+                  {v !== 0 ? (
+                    <text
+                      x={bx + bw / 2}
+                      y={by - 2}
+                      textAnchor="middle"
+                      fontSize="5.5"
+                      fill={color}
+                      fontWeight="600"
+                    >
+                      {chartValue(v)}
+                    </text>
+                  ) : null}
+                </g>
               );
             };
             return (
@@ -424,17 +448,36 @@ function MoneyChart({
             {line("expense", EXPENSE)}
             {line("income", INCOME)}
             {line("net", BALANCE)}
-            {points.map((p, i) => (
-              <circle
-                key={p.key}
-                cx={x(i)}
-                cy={y(p.expense)}
-                r={activeKey === p.key ? 3.5 : 2}
-                fill={EXPENSE}
-                className="cursor-pointer"
-                onClick={() => onPick?.(p.key)}
-              />
-            ))}
+            {points.map((p, i) => {
+              const cx = x(i);
+              return (
+                <g key={p.key}>
+                  <circle
+                    cx={cx}
+                    cy={y(p.expense)}
+                    r={activeKey === p.key ? 3.5 : 2}
+                    fill={EXPENSE}
+                    className="cursor-pointer"
+                    onClick={() => onPick?.(p.key)}
+                  />
+                  {p.expense !== 0 ? (
+                    <text x={cx} y={y(p.expense) - 4} textAnchor="middle" fontSize="5.5" fill={EXPENSE} fontWeight="600">
+                      {chartValue(p.expense)}
+                    </text>
+                  ) : null}
+                  {p.income !== 0 ? (
+                    <text x={cx} y={y(p.income) - 10.5} textAnchor="middle" fontSize="5.5" fill={INCOME} fontWeight="600">
+                      {chartValue(p.income)}
+                    </text>
+                  ) : null}
+                  {p.net !== 0 ? (
+                    <text x={cx} y={y(p.net) - 17} textAnchor="middle" fontSize="5.5" fill={BALANCE} fontWeight="600">
+                      {chartValue(p.net)}
+                    </text>
+                  ) : null}
+                </g>
+              );
+            })}
           </>
         )}
       {points.map((p, i) =>
