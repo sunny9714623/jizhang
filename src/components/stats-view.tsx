@@ -20,10 +20,10 @@ function pad(n: number) {
 function chartValue(fen: number): string {
   const sign = fen < 0 ? "-" : "";
   const yuan = Math.abs(fen) / 100;
-  if (yuan >= 10000) return `${sign}${(yuan / 10000).toFixed(1)}万`;
-  if (yuan >= 1000) return `${sign}${(yuan / 1000).toFixed(1)}千`;
-  if (yuan >= 100) return `${sign}${Math.round(yuan)}`;
-  return `${sign}${yuan.toFixed(yuan % 1 === 0 ? 0 : 1)}`;
+  const text = Number.isInteger(yuan)
+    ? String(yuan)
+    : String(yuan.toFixed(2)).replace(/0+$/, "").replace(/\.$/, "");
+  return `${sign}¥${text}`;
 }
 
 function seriesFor(txs: Tx[], span: Span, year: string, month: string, day: string): Point[] {
@@ -433,7 +433,7 @@ function MoneyChart({
 }) {
   const w = 320;
   const h = 188;
-  const padL = 8;
+  const padL = 40;
   const padR = 8;
   const padT = 32;
   const padB = 28;
@@ -450,9 +450,51 @@ function MoneyChart({
     return <path d={d} fill="none" stroke={color} strokeWidth="1.8" />;
   };
   const labelEvery = n > 14 ? Math.ceil(n / 8) : n > 8 ? 2 : 1;
+  const gridFracs = [0, 0.25, 0.5, 0.75];
+  const maxIdx = points.findIndex(
+    (p) => Math.max(Math.abs(p.expense), Math.abs(p.income), Math.abs(p.net)) >= max,
+  );
 
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 w-full">
+      {gridFracs.map((f) => {
+        const gy = padT + innerH - f * innerH;
+        return (
+          <g key={f}>
+            <line x1={padL} x2={w - padR} y1={gy} y2={gy} stroke="var(--color-border)" strokeWidth="0.7" />
+            <text x={padL - 4} y={gy + 2} textAnchor="end" fontSize="5.5" className="fill-muted">
+              {chartValue(max * f)}
+            </text>
+          </g>
+        );
+      })}
+      {maxIdx >= 0 ? (
+        <g>
+          <line
+            x1={padL}
+            x2={w - padR}
+            y1={padT}
+            y2={padT}
+            stroke="var(--color-muted)"
+            strokeWidth="0.8"
+            strokeDasharray="2.5 2"
+            opacity="0.65"
+          />
+          <text x={padL - 4} y={padT + 2} textAnchor="end" fontSize="5.5" className="fill-muted" fontWeight="600">
+            {chartValue(max)}
+          </text>
+          <line
+            x1={x(maxIdx)}
+            x2={x(maxIdx)}
+            y1={padT}
+            y2={padT + innerH}
+            stroke="var(--color-muted)"
+            strokeWidth="0.8"
+            strokeDasharray="2.5 2"
+            opacity="0.65"
+          />
+        </g>
+      ) : null}
       {kind === "bar"
         ? points.map((p, i) => {
             const bw = Math.max(1.2, (slot - gap) / 3);
@@ -534,7 +576,7 @@ function MoneyChart({
           </>
         )}
       {points.map((p, i) =>
-        i === 0 || i === n - 1 || i % labelEvery === 0 ? (
+        i === 0 || i === n - 1 || i % labelEvery === 0 || i === maxIdx ? (
           <text
             key={`${p.key}-l`}
             x={x(i)}
@@ -542,6 +584,7 @@ function MoneyChart({
             textAnchor="middle"
             className="fill-muted"
             fontSize="8"
+            fontWeight={i === maxIdx ? "700" : undefined}
           >
             {p.label}
           </text>

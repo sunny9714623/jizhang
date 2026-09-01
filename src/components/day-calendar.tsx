@@ -3,6 +3,7 @@ import { formatYuan, shanghaiDate, type Tx } from "@/lib/ledger";
 import { TxRow } from "@/components/tx-list";
 import { SortBar, sortTxs, type AmountSort } from "@/components/amount-sort";
 import { cn } from "@/lib/utils";
+import { holidayOf } from "@/lib/holidays";
 
 const WEEK = ["一", "二", "三", "四", "五", "六", "日"];
 
@@ -40,6 +41,9 @@ export function DayCalendar({ txs, month }: { txs: Tx[]; month: string }) {
   ];
   while (cells.length % 7 !== 0) cells.push(null);
   const selected = byDay.get(picked);
+  const monthHasMark = cells.some(
+    (d) => d !== null && holidayOf(dayStamp(year, mo, d)),
+  );
 
   return (
     <section className="rounded-xl bg-elevated px-4 py-4 shadow-[var(--shadow-border)]">
@@ -56,6 +60,7 @@ export function DayCalendar({ txs, month }: { txs: Tx[]; month: string }) {
           const row = byDay.get(d);
           const stamp = dayStamp(year, mo, d);
           const on = d === picked;
+          const mark = holidayOf(stamp);
           return (
             <button
               key={d}
@@ -68,6 +73,20 @@ export function DayCalendar({ txs, month }: { txs: Tx[]; month: string }) {
               )}
             >
               <span className={cn("text-xs", on ? "text-primary-fg" : "text-fg")}>{d}</span>
+              {mark ? (
+                <span
+                  className={cn(
+                    "max-w-full truncate text-[8px] leading-none",
+                    on
+                      ? "text-primary-fg/85"
+                      : mark.kind === "holiday"
+                        ? "text-danger"
+                        : "text-amber-600 dark:text-amber-400",
+                  )}
+                >
+                  {mark.name}
+                </span>
+              ) : null}
               {row?.expense ? (
                 <span className={cn("text-[9px] tabular-nums", on ? "text-primary-fg/80" : "text-muted")}>
                   −{formatYuan(row.expense)}
@@ -86,6 +105,11 @@ export function DayCalendar({ txs, month }: { txs: Tx[]; month: string }) {
         {Number(mo)}月{picked}日
         {selected ? ` · 支 ${formatYuan(selected.expense)} · 收 ${formatYuan(selected.income)}` : " · 没有记录"}
       </p>
+      {monthHasMark ? (
+        <p className="mt-1 text-[10px] text-subtle">
+          红字为法定节假日，橙字为调休上班
+        </p>
+      ) : null}
       {selected?.items.length ? (
         <div className="mt-2">
           <div className="mb-2 flex justify-end">

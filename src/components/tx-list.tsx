@@ -241,7 +241,7 @@ export function TxList() {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜商家、说明"
+            placeholder="搜商家 / 支付方式 / 说明 / 备注 / 分类"
             className="relative z-20 h-11 w-full rounded-md bg-elevated px-4 text-fg shadow-[var(--shadow-border)] placeholder:text-subtle focus:outline-none focus:ring-2 focus:ring-fg/20"
           />
         </label>

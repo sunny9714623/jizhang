@@ -38,7 +38,7 @@ import {
   type KindDef,
   type Recurring,
 } from "./models";
-import { DEFAULT_LEAVES, groupIdOf, type CatLeaf } from "./categories";
+import { DEFAULT_LEAVES, groupIdOf, leafLabel, type CatLeaf } from "./categories";
 import { type BookId } from "./books";
 import { DEFAULT_LEDGER, DEFAULT_LEDGER_ID, type LedgerFile } from "./ledgers";
 import { isAutoFineId, toPlainCategory } from "./fine-cat";
@@ -1333,7 +1333,9 @@ export function visibleTxs(
       if (tx.direction !== "expense" || tx.category !== catFilter) return false;
     }
     if (!q) return true;
-    return `${tx.merchant}${tx.title}${tx.note}${tx.method}`.toLowerCase().includes(q);
+    return `${tx.merchant}${tx.title}${tx.note}${tx.method}${leafLabel(cats, tx.category)}`
+      .toLowerCase()
+      .includes(q);
   });
 }
 
