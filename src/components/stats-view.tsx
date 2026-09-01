@@ -1,10 +1,8 @@
 import { useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { formatYuan, formatSignedYuan, shanghaiDate, signedYuan, type Tx } from "@/lib/ledger";
 import { leafLabel, type CatLeaf } from "@/lib/categories";
 import { txsInLedger } from "@/lib/ledgers";
 import { useLedger } from "@/lib/ledger-store";
-import { MonthPick } from "@/components/month-bar";
 import { CatMark } from "@/components/cat-mark";
 import { cn } from "@/lib/utils";
 
@@ -28,48 +26,49 @@ function chartValue(fen: number): string {
   return `${sign}${yuan.toFixed(yuan % 1 === 0 ? 0 : 1)}`;
 }
 
-function seriesFor(txs: Tx[], span: Span, year: string, month: string): Point[] {
+function seriesFor(txs: Tx[], span: Span, year: string, month: string, day: string): Point[] {
   if (span === "day") {
-    const days = new Date(Number(year), Number(month), 0).getDate();
-    const points: Point[] = Array.from({ length: days }, (_, i) => ({
-      key: `${year}-${month}-${pad(i + 1)}`,
-      label: `${Number(month)}/${i + 1}`,
-      expense: 0,
-      income: 0,
-      net: 0,
-    }));
+    const center = new Date(Number(year), Number(month) - 1, Number(day));
+    const byKey = new Map<string, Point>();
+    for (let off = -15; off <= 15; off++) {
+      const d = new Date(center.getFullYear(), center.getMonth(), center.getDate() + off);
+      const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      byKey.set(key, { key, label: `${d.getMonth() + 1}/${d.getDate()}`, expense: 0, income: 0, net: 0 });
+    }
     for (const tx of txs) {
       const p = shanghaiDate(tx.time);
-      if (p.year !== year || p.month !== month) continue;
-      const bucket = points[p.day - 1];
+      const bucket = byKey.get(`${p.year}-${p.month}-${pad(p.day)}`);
       if (!bucket) continue;
       if (tx.direction === "expense") bucket.expense += tx.amountFen;
       else if (tx.direction === "income") bucket.income += tx.amountFen;
     }
+    const points = [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
     for (const p of points) p.net = p.income - p.expense;
     return points;
   }
   if (span === "month") {
-    const points: Point[] = Array.from({ length: 12 }, (_, i) => ({
-      key: `${year}-${pad(i + 1)}`,
-      label: `${i + 1}月`,
-      expense: 0,
-      income: 0,
-      net: 0,
-    }));
+    const byKey = new Map<string, Point>();
+    for (let off = -5; off <= 5; off++) {
+      const d = new Date(Number(year), Number(month) - 1 + off, 1);
+      const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+      byKey.set(key, { key, label: `${d.getMonth() + 1}月`, expense: 0, income: 0, net: 0 });
+    }
     for (const tx of txs) {
       const p = shanghaiDate(tx.time);
-      if (p.year !== year) continue;
-      const bucket = points[Number(p.month) - 1];
+      const bucket = byKey.get(`${p.year}-${p.month}`);
       if (!bucket) continue;
       if (tx.direction === "expense") bucket.expense += tx.amountFen;
       else if (tx.direction === "income") bucket.income += tx.amountFen;
     }
+    const points = [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
     for (const p of points) p.net = p.income - p.expense;
     return points;
   }
   const bag = new Map<string, Point>();
-  bag.set(year, { key: year, label: `${year}年`, expense: 0, income: 0, net: 0 });
+  for (let off = -5; off <= 5; off++) {
+    const y = String(Number(year) + off);
+    bag.set(y, { key: y, label: `${y}年`, expense: 0, income: 0, net: 0 });
+  }
   for (const tx of txs) {
     const y = shanghaiDate(tx.time).year;
     let bucket = bag.get(y);
@@ -124,7 +123,7 @@ export function StatsView() {
     storeMonth === `${today.year}-${today.month}` ? pad(today.day) : "01",
   );
   const [side, setSide] = useState<"expense" | "income">("expense");
-  const points = useMemo(() => seriesFor(txs, span, year, month), [txs, span, year, month]);
+  const points = useMemo(() => seriesFor(txs, span, year, month, day), [txs, span, year, month, day]);
   const tops = useMemo(
     () => topRecords(txs, span, year, month, day, side),
     [txs, span, year, month, day, side],
@@ -137,6 +136,38 @@ export function StatsView() {
   const sumExp = active?.expense ?? 0;
   const sumInc = active?.income ?? 0;
   const period = span === "day" ? "当日" : span === "month" ? "当月" : "当年";
+
+  const isToday = dateValue === `${today.year}-${today.month}-${pad(today.day)}`;
+  const isCurMonth = monthValue === `${today.year}-${today.month}`;
+  const isCurYear = year === today.year;
+  const prevDate = new Date(Number(year), Number(month) - 1, Number(day) - 1);
+  const nextDate = new Date(Number(year), Number(month) - 1, Number(day) + 1);
+  const prevMonth = new Date(Number(year), Number(month) - 2, 1);
+  const nextMonth = new Date(Number(year), Number(month), 1);
+  const prevLabel =
+    span === "day"
+      ? isToday
+        ? "昨天"
+        : `${prevDate.getMonth() + 1}/${prevDate.getDate()}`
+      : span === "month"
+        ? isCurMonth
+          ? "上月"
+          : `${prevMonth.getMonth() + 1}月`
+        : isCurYear
+          ? "去年"
+          : `${Number(year) - 1}年`;
+  const nextLabel =
+    span === "day"
+      ? isToday
+        ? "明天"
+        : `${nextDate.getMonth() + 1}/${nextDate.getDate()}`
+      : span === "month"
+        ? isCurMonth
+          ? "下月"
+          : `${nextMonth.getMonth() + 1}月`
+        : isCurYear
+          ? "明年"
+          : `${Number(year) + 1}年`;
 
   const shift = (dir: number) => {
     if (span === "year") {
@@ -192,58 +223,80 @@ export function StatsView() {
             </button>
           ))}
         </div>
-        <div className="mt-3 flex items-center justify-between">
-          <button type="button" className="flex size-11 items-center justify-center text-muted" onClick={() => shift(-1)}>
-            <ChevronLeft className="size-5" />
-          </button>
-          {span === "day" ? (
-            <label className="relative inline-flex cursor-pointer items-center">
-              <span className="font-display text-lg text-fg">
-                {year}年{Number(month)}月{Number(day)}日
-              </span>
-              <input
-                type="date"
-                value={dateValue}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (!v) return;
-                  setYear(v.slice(0, 4));
-                  setMonth(v.slice(5, 7));
-                  setDay(v.slice(8, 10));
-                }}
-                className="absolute inset-0 cursor-pointer opacity-0"
-                aria-label="选择日期"
-              />
-            </label>
-          ) : span === "month" ? (
-            <MonthPick
-              value={monthValue}
-              onChange={(v) => {
-                setYear(v.slice(0, 4));
-                setMonth(v.slice(5, 7));
-              }}
-              className="text-lg"
-            />
-          ) : (
-            <label className="relative inline-flex cursor-pointer items-center">
-              <span className="font-display text-lg text-fg">{year}年</span>
-              <input
-                type="number"
-                min={1990}
-                max={2100}
-                value={year}
-                onChange={(e) => {
-                  const v = e.target.value.slice(0, 4);
-                  if (/^\d{4}$/.test(v)) setYear(v);
-                }}
-                className="absolute inset-0 cursor-pointer opacity-0"
-                aria-label="选择年份"
-              />
-            </label>
-          )}
-          <button type="button" className="flex size-11 items-center justify-center text-muted" onClick={() => shift(1)}>
-            <ChevronRight className="size-5" />
-          </button>
+        <div className="mt-3 flex justify-center">
+          <div className="flex items-center rounded-full bg-surface p-0.5 shadow-[var(--shadow-border)]">
+            <button
+              type="button"
+              onClick={() => shift(-1)}
+              className="h-10 min-w-16 rounded-full px-3 text-xs text-muted"
+              aria-label={span === "day" ? "前一天" : span === "month" ? "上个月" : "上一年"}
+            >
+              {prevLabel}
+            </button>
+            {span === "day" ? (
+              <label className="relative flex h-10 min-w-24 cursor-pointer flex-col items-center justify-center rounded-full bg-primary px-4 text-primary-fg">
+                {isToday ? <span className="text-[10px] leading-none opacity-80">当日</span> : null}
+                <span className="font-display text-sm leading-tight">
+                  {Number(month)}月{Number(day)}日
+                </span>
+                <input
+                  type="date"
+                  value={dateValue}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    setYear(v.slice(0, 4));
+                    setMonth(v.slice(5, 7));
+                    setDay(v.slice(8, 10));
+                  }}
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                  aria-label="选择日期"
+                />
+              </label>
+            ) : span === "month" ? (
+              <label className="relative flex h-10 min-w-24 cursor-pointer flex-col items-center justify-center rounded-full bg-primary px-4 text-primary-fg">
+                {isCurMonth ? <span className="text-[10px] leading-none opacity-80">当月</span> : null}
+                <span className="font-display text-sm leading-tight">{Number(month)}月</span>
+                <input
+                  type="month"
+                  value={monthValue}
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    setYear(e.target.value.slice(0, 4));
+                    setMonth(e.target.value.slice(5, 7));
+                  }}
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                  style={{ fontSize: 16 }}
+                  aria-label="选择月份"
+                />
+              </label>
+            ) : (
+              <label className="relative flex h-10 min-w-24 cursor-pointer flex-col items-center justify-center rounded-full bg-primary px-4 text-primary-fg">
+                {isCurYear ? <span className="text-[10px] leading-none opacity-80">当年</span> : null}
+                <span className="font-display text-sm leading-tight">{year}年</span>
+                <input
+                  type="number"
+                  min={1990}
+                  max={2100}
+                  value={year}
+                  onChange={(e) => {
+                    const v = e.target.value.slice(0, 4);
+                    if (/^\d{4}$/.test(v)) setYear(v);
+                  }}
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                  aria-label="选择年份"
+                />
+              </label>
+            )}
+            <button
+              type="button"
+              onClick={() => shift(1)}
+              className="h-10 min-w-16 rounded-full px-3 text-xs text-muted"
+              aria-label={span === "day" ? "后一天" : span === "month" ? "下个月" : "下一年"}
+            >
+              {nextLabel}
+            </button>
+          </div>
         </div>
         <div className="mx-auto mt-2 grid w-fit grid-cols-3 gap-4 text-center text-xs">
           <div>
