@@ -1,0 +1,21 @@
+{
+  "envId": "jizhang-d0gp59eet1dd1ceac",
+  "framework": {
+    "name": "jizhang",
+    "plugins": {}
+  },
+  "functionRoot": "cloudfunctions",
+  "functions": [
+    {
+      "name": "ledgerApi",
+      "timeout": 20,
+      "runtime": "Nodejs16.13",
+      "installDependency": true,
+      "envVariables": {}
+    }
+  ],
+  "hosting": {
+    "dir": "dist/client",
+    "ignore": [".git", "samples"]
+  }
+}

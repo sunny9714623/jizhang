@@ -21,6 +21,7 @@ import { useLedger } from "@/lib/ledger-store";
 import { cn } from "@/lib/utils";
 import { inLedger, txsInLedger } from "@/lib/ledgers";
 import { RestoreFileButton } from "@/components/restore-sheet";
+import { CloudPanel } from "@/components/cloud/family-panel";
 
 export function MoreView() {
   const [perm, setPerm] = useState<NotificationPermission | "unsupported">("default");
@@ -64,6 +65,7 @@ export function MoreView() {
 
   return (
     <div className="flex flex-col gap-5 pb-8">
+      <CloudPanel />
       <p className="px-1 text-sm text-muted">
         当前账本「{ledgers.find((l) => l.id === ledgerId)?.name ?? "月梨账单"}」。点顶部名称进入账本管理。
       </p>

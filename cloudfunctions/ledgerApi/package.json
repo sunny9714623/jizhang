@@ -1,0 +1,10 @@
+{
+  "name": "ledgerApi",
+  "version": "1.0.0",
+  "description": "月梨账单云函数：家庭共享、成员管理、流水读写",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.9.0"
+  }
+}

@@ -17,6 +17,9 @@ import { dueRecurring, fireDueNotifications, recordedToday } from "@/lib/remind"
 import { useLedger, type Tab } from "@/lib/ledger-store";
 import { BooksView } from "@/components/ledger-dir";
 import { cn } from "@/lib/utils";
+import { useCloud } from "@/lib/cloudbase/cloud-store";
+import { LoginGate } from "@/components/cloud/login-gate";
+import { AgentFloatingChat } from "@/components/agent-panel";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -105,12 +108,61 @@ function Home() {
   const wallpaper = useLedger((s) => s.wallpaper);
   const dark = useLedger((s) => s.dark);
   const toggleDark = useLedger((s) => s.toggleDark);
+  const cloudActivate = useLedger((s) => s.cloudActivate);
   const photoWall = isPhotoWall(wallpaper);
   const lightTitle = wallNeedsLightText(wallpaper);
+
+  const cloudReady = useCloud((s) => s.ready);
+  const cloudUser = useCloud((s) => s.user);
+  const cloudError = useCloud((s) => s.error);
+  const cloudBoot = useCloud((s) => s.boot);
+  const activeFamilyId = useCloud((s) => s.activeFamilyId);
+  const localOnly = useCloud((s) => s.localOnly);
+  const setLocalOnly = useCloud((s) => s.setLocalOnly);
+  const enterDemo = useCloud((s) => s.enterDemo);
+  const reload = useCloud((s) => s.reload);
+
+  useEffect(() => {
+    void cloudBoot();
+  }, [cloudBoot]);
+
+  useEffect(() => {
+    if (!cloudReady) return;
+    if (cloudUser) {
+      setLocalOnly(false);
+      if (activeFamilyId) void cloudActivate(activeFamilyId, null);
+    } else {
+      void cloudActivate(null, null);
+    }
+  }, [cloudReady, cloudUser, activeFamilyId, cloudActivate, setLocalOnly]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
+
+  if (cloudReady && !cloudUser && !localOnly) {
+    return (
+      <div className="relative h-full overflow-hidden bg-bg text-fg">
+        <div className="mx-auto h-full w-full max-w-md">
+          <LoginGate
+            error={cloudError}
+            onSkip={() => setLocalOnly(true)}
+            onDemo={enterDemo}
+            onLoggedIn={() => void reload()}
+          />
+          <Toaster
+            theme="light"
+            position="top-center"
+            toastOptions={{
+              classNames: {
+                toast: "bg-elevated text-fg border-border shadow-[var(--shadow-border)]",
+              },
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -192,6 +244,7 @@ function Home() {
           <TabBtn id="more" label="家当" icon={Coins} active={tab === "more"} onClick={setTab} />
         </nav>
 
+        <AgentFloatingChat />
         <TxDetail />
         <Composer />
         <RestoreSheet />

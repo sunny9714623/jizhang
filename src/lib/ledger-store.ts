@@ -43,6 +43,13 @@ import { type BookId } from "./books";
 import { DEFAULT_LEDGER, DEFAULT_LEDGER_ID, type LedgerFile } from "./ledgers";
 import { isAutoFineId, toPlainCategory } from "./fine-cat";
 import {
+  pullFromCloud,
+  syncTxRemove,
+  syncTxUpsert,
+  uploadToCloud,
+} from "./cloudbase/sync";
+import { isDemoMode } from "./cloudbase/cloud-store";
+import {
   downloadSnapshot,
   isSnapshotFile,
   markUsed,
@@ -126,6 +133,8 @@ type LedgerState = {
   catBag: Record<BookId, CatLeaf[]>;
   ledgers: LedgerFile[];
   ledgerId: string;
+  cloudFamilyId: string | null;
+  cloudLedgerId: string | null;
   kinds: KindDef[];
   hydrate: () => Promise<void>;
   setTab: (tab: Tab) => void;
@@ -185,6 +194,9 @@ type LedgerState = {
   removeCat: (id: string) => Promise<void>;
   setBook: (id: BookId) => void;
   setLedger: (id: string) => Promise<void>;
+  cloudActivate: (familyId: string | null, ledgerId: string | null) => Promise<void>;
+  cloudPull: () => Promise<void>;
+  cloudUploadAll: () => Promise<void>;
   createLedger: (name: string, folder: string) => Promise<void>;
   renameLedger: (id: string, name: string) => Promise<void>;
   setLedgerFolder: (id: string, folder: string) => Promise<void>;
@@ -274,6 +286,8 @@ async function addTx(
     tab: "list",
   });
   await dbPutMany(cleaned.filter((t) => t.origin !== "sample"));
+  const familyId = get().cloudFamilyId;
+  if (familyId) void syncTxUpsert(familyId, tagged);
 }
 
 async function writeLedgerTx(
@@ -294,6 +308,8 @@ async function writeLedgerTx(
     month: monthKey(tx.time),
   });
   await dbPutMany(cleaned.filter((t) => t.origin !== "sample"));
+  const familyId = get().cloudFamilyId;
+  if (familyId) void syncTxUpsert(familyId, tx);
 }
 
 function txFromAccountDelta(account: Account, deltaNet: number, kinds: KindDef[]): Tx {
@@ -318,7 +334,7 @@ function txFromAccountDelta(account: Account, deltaNet: number, kinds: KindDef[]
 
 let lastClip = "";
 
-async function fileToJpegDataUrl(file: File, max = 1280, quality = 0.82): Promise<string> {
+export async function fileToJpegDataUrl(file: File, max = 1280, quality = 0.82): Promise<string> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
   const width = Math.max(1, Math.round(bitmap.width * scale));
@@ -410,6 +426,8 @@ export const useLedger = create<LedgerState>((set, get) => ({
   catBag: { main: DEFAULT_LEAVES, bills: DEFAULT_LEAVES },
   ledgers: [DEFAULT_LEDGER],
   ledgerId: DEFAULT_LEDGER_ID,
+  cloudFamilyId: null,
+  cloudLedgerId: null,
   kinds: DEFAULT_KINDS,
 
   hydrate: async () => {
@@ -590,9 +608,12 @@ export const useLedger = create<LedgerState>((set, get) => ({
 
   recordQuick: async (draft) => {
     const merchant = draft.merchant.trim() || "未注明对方";
+    const time = draft.date && /^\d{4}-\d{2}-\d{2}$/.test(draft.date)
+      ? new Date(`${draft.date}T12:00:00+08:00`).getTime()
+      : Date.now();
     const tx: Tx = {
       id: newId(),
-      time: Date.now(),
+      time,
       amountFen: draft.amountFen,
       direction: draft.direction === "income" ? "income" : "expense",
       category: draft.category,
@@ -622,11 +643,16 @@ export const useLedger = create<LedgerState>((set, get) => ({
     const keep = wasSample ? [] : get().txs.filter((t) => t.origin !== "sample");
     const incoming: Tx[] = [];
     const seen = [...keep];
+    const base = Date.now();
     for (const draft of drafts) {
       const merchant = draft.merchant.trim() || "未注明对方";
+      const dated =
+        draft.date && /^\d{4}-\d{2}-\d{2}$/.test(draft.date)
+          ? new Date(`${draft.date}T12:00:00+08:00`).getTime() + incoming.length
+          : base + incoming.length;
       const tx: Tx = {
         id: newId(),
-        time: Date.now() + incoming.length,
+        time: dated,
         amountFen: draft.amountFen,
         direction: draft.direction === "income" ? "income" : "expense",
         category: draft.category,
@@ -728,6 +754,8 @@ export const useLedger = create<LedgerState>((set, get) => ({
     try {
       await dbDeleteTx(id);
       await dbSetMeta("usingSample", false);
+      const familyId = get().cloudFamilyId;
+      if (familyId) void syncTxRemove(familyId, [id]);
       toast.success("已删除");
     } catch (err) {
       console.error(err);
@@ -747,6 +775,8 @@ export const useLedger = create<LedgerState>((set, get) => ({
     try {
       await dbDeleteMany([...drop]);
       await dbSetMeta("usingSample", false);
+      const familyId = get().cloudFamilyId;
+      if (familyId) void syncTxRemove(familyId, [...drop]);
       toast.success(`已删 ${drop.size} 笔`);
     } catch (err) {
       console.error(err);
@@ -1207,6 +1237,90 @@ export const useLedger = create<LedgerState>((set, get) => ({
     if (!get().ledgers.some((l) => l.id === id)) return;
     set({ ledgerId: id, catFilter: null, groupFilter: null, selectedId: null, tab: "home" });
     await dbSetMeta("ledgerId", id);
+  },
+
+  cloudActivate: async (familyId, ledgerId) => {
+    if (!familyId) {
+      set({ cloudFamilyId: null, cloudLedgerId: null });
+      return;
+    }
+    if (isDemoMode()) {
+      set({ cloudFamilyId: familyId, cloudLedgerId: "demo-ledger" });
+      return;
+    }
+    try {
+      const res = await pullFromCloud(familyId);
+      const cloudLedgerId = ledgerId ?? res.ledgers[0]?._id ?? null;
+      if (!cloudLedgerId) {
+        set({ cloudFamilyId: familyId, cloudLedgerId: null });
+        toast.error("家庭账本还没初始化，请稍后再试");
+        return;
+      }
+      const cloudIds = new Set(res.txs.map((t) => t.id));
+      const merged = sortTx([
+        ...get().txs.filter((t) => !cloudIds.has(t.id)),
+        ...res.txs,
+      ]);
+      set({
+        cloudFamilyId: familyId,
+        cloudLedgerId,
+        txs: merged,
+        ledgerId: cloudLedgerId,
+        month: monthKey(Date.now()),
+        catFilter: null,
+        groupFilter: null,
+        selectedId: null,
+        tab: "home",
+      });
+      await dbPutMany(merged.filter((t) => t.origin !== "sample"));
+      toast.success("已切换到家庭账本");
+    } catch (err) {
+      set({ cloudFamilyId: familyId });
+      console.error("[cloud] activate failed", err);
+      toast.error(err instanceof Error ? err.message : "读取云端账本失败");
+    }
+  },
+
+  cloudPull: async () => {
+    const familyId = get().cloudFamilyId;
+    if (!familyId) return;
+    if (isDemoMode()) {
+      toast.message("体验模式：数据仅存本机");
+      return;
+    }
+    try {
+      const res = await pullFromCloud(familyId);
+      const cloudIds = new Set(res.txs.map((t) => t.id));
+      const merged = sortTx([
+        ...get().txs.filter((t) => !cloudIds.has(t.id)),
+        ...res.txs,
+      ]);
+      set({ txs: merged });
+      await dbPutMany(merged.filter((t) => t.origin !== "sample"));
+      toast.success("已从云端同步");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "同步失败");
+    }
+  },
+
+  cloudUploadAll: async () => {
+    const familyId = get().cloudFamilyId;
+    if (!familyId) return;
+    if (isDemoMode()) {
+      toast.message("体验模式：数据仅存本机");
+      return;
+    }
+    const local = get().txs.filter((t) => t.origin !== "sample" && !isAccountTx(t));
+    if (local.length === 0) {
+      toast.message("本地没有可上传的流水");
+      return;
+    }
+    try {
+      const res = await uploadToCloud(familyId, local);
+      toast.success(`已上传 ${res.imported} 笔流水`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "上传失败");
+    }
   },
 
   createLedger: async (name, folder) => {

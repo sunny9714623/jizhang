@@ -35,3 +35,13 @@ npm run build
 - “截图识别”依赖服务端的 `XAI_API_KEY`，GitHub Pages 上没有服务器，该项会提示不可用；其余功能（导入账单、粘贴支付消息、统计、备份）全部可用。
 - 数据只存在当前浏览器，跨设备同步请使用“导出 / 导入”备份功能。
 - 如需恢复 Vercel 部署，执行 `NITRO_PRESET=vercel npm run build` 即可（产物在 `.output/`）。
+
+## AI 记账助手（DeepSeek）
+
+右下角的机器人悬浮按钮会弹出「AI 记账助手」对话窗口，后端调用 DeepSeek 模型，支持：自然语言记账、支付截图识别记账、语音记账（浏览器语音转文字后交给模型理解）、分析每月支出并给出建议。
+
+- 文本模型默认 `deepseek-v4-flash`，截图识别默认 `deepseek-v4-flash-vision-exp`。
+- 项目已内置一个默认 `DEEPSEEK_API_KEY`（见 `src/lib/agent-server.ts` 的 `DEFAULT_API_KEY`），开箱即用；请勿把它公开到他人可见的仓库/部署。
+- 换 Key 的方式（环境变量优先）：在启动服务的环境里设置 `DEEPSEEK_API_KEY`（可选 `DEEPSEEK_MODEL` / `DEEPSEEK_VISION_MODEL` 覆盖模型），或替换代码里的 `DEFAULT_API_KEY`；也可在应用里点助手右上角“连接”粘贴 Key——只保存在当前浏览器的本地数据库。
+- 语音识别使用浏览器内置能力（Chrome / Edge），不需要额外密钥。
+- GitHub Pages 是纯静态托管、没有服务端，AI 调用会提示不可用；需要 AI 功能请运行本地开发服务或部署到带服务端的平台（如 Vercel）。

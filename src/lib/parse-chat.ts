@@ -1,6 +1,8 @@
 import { categorize, type CategoryId } from "./ledger";
 
 export type ChatDraft = {
+  /** "YYYY-MM-DD"；缺省时按当前时间入账。 */
+  date?: string;
   amountFen: number;
   direction: "expense" | "income";
   merchant: string;

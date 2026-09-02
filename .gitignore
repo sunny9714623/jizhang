@@ -2,6 +2,7 @@ node_modules/
 .output/
 dist/
 screenshots/
+artifacts/
 .idea/
 .project_id
 .github_repo
