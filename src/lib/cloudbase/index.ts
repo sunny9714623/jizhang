@@ -2,6 +2,8 @@ import cloudbase from "@cloudbase/js-sdk";
 
 /** CloudBase 环境 ID（腾讯云开发控制台 → 环境） */
 export const CLOUDBASE_ENV = "jizhang-d0gp59eet1dd1ceac";
+/** 环境所在地域（上海） */
+export const CLOUDBASE_REGION = "ap-shanghai";
 
 type App = ReturnType<typeof cloudbase.init>;
 
@@ -11,7 +13,7 @@ export function getApp(): App | null {
   if (typeof window === "undefined") return null;
   if (!app) {
     try {
-      app = cloudbase.init({ env: CLOUDBASE_ENV });
+      app = cloudbase.init({ env: CLOUDBASE_ENV, region: CLOUDBASE_REGION });
     } catch {
       app = null;
     }
@@ -24,29 +26,81 @@ export function getAuth() {
   return a ? a.auth() : null;
 }
 
-/** 读取当前登录用户（v2 SDK：本地有缓存时 currentUser 同步可用） */
+/** 读取当前登录用户；任何异常都按“未登录”处理，避免残留失效用户卡住启动流程 */
 export async function getCurrentUser() {
   const auth = getAuth();
   if (!auth) return null;
   try {
     const user = await Promise.race([
       auth.getCurrentUser(),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
     ]);
-    return user ?? auth.currentUser;
-  } catch {
-    return auth.currentUser;
+    return user ?? null;
+  } catch (err) {
+    console.warn("[cloud] getCurrentUser failed", err);
+    return null;
   }
 }
 
-export async function signOutCloud() {
+/** 是否属于“登录态失效 / 未登录”类错误（可安全清理本地状态） */
+const AUTH_STATE_PATTERNS = [
+  /请先登录/,
+  /未登录/,
+  /登录状态/,
+  /login_type_disabled/,
+  /登录方式未开启/,
+  /not logged ?in/i,
+  /unauthorized/i,
+  /unauthenticated/i,
+  /invalid (access|refresh)_?token/i,
+  /(access|refresh)_?token (invalid|expired|disabled)/i,
+  /\b401\b/,
+];
+
+export function isAuthStateError(err: unknown): boolean {
+  const raw =
+    typeof err === "string"
+      ? err
+      : err instanceof Error
+        ? `${err.message} ${err.name}`
+        : JSON.stringify(err ?? "");
+  return AUTH_STATE_PATTERNS.some((re) => re.test(raw));
+}
+
+/**
+ * 清理 CloudBase 登录态：先尝试服务端登出，再清除浏览器里缓存的
+ * 用户信息与 access/refresh token（可能已经失效，无法通过 SDK 正常登出）。
+ */
+export async function clearCloudAuth(): Promise<void> {
   const auth = getAuth();
   if (auth) {
     try {
       await auth.signOut();
     } catch {
-      // 忽略登出异常
+      // 忽略：服务端登出失败也要继续清本地
     }
+  }
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      const lower = key.toLowerCase();
+      if (
+        lower.includes(CLOUDBASE_ENV.toLowerCase()) ||
+        lower === "device_id" ||
+        lower.startsWith("credentials_") ||
+        lower.startsWith("user_info_") ||
+        lower.startsWith("oauth_") ||
+        lower.startsWith("tcb_") ||
+        lower.startsWith("cloudbase_")
+      ) {
+        doomed.push(key);
+      }
+    }
+    for (const key of doomed) localStorage.removeItem(key);
+  } catch {
+    // 隐私模式等场景下忽略
   }
 }
 
@@ -118,14 +172,30 @@ export async function handleWechatCallback(): Promise<boolean> {
   const auth = getAuth();
   if (!auth) return false;
   const redirectUri = `${location.origin}${location.pathname}`;
-  const { provider_token } = await auth.grantProviderToken({
-    provider_id: "wx_open",
-    provider_redirect_uri: redirectUri,
-    provider_code: providerCode,
-  });
-  await auth.signInWithProvider({ provider_token });
-  history.replaceState(null, "", `${location.pathname}${location.hash}`);
-  return true;
+  try {
+    const { provider_token } = await auth.grantProviderToken({
+      provider_id: "wx_open",
+      provider_redirect_uri: redirectUri,
+      provider_code: providerCode,
+    });
+    try {
+      await auth.signInWithProvider({ provider_token });
+    } catch (err) {
+      // 首次使用微信登录：该微信尚未关联 CloudBase 账号，需先绑定再登录
+      const e = (err ?? {}) as { error?: string; code?: string; message?: string };
+      const notLinked =
+        e?.error === "not_found" ||
+        e?.code === "not_found" ||
+        /not_?found/i.test(`${e?.message ?? ""} ${e?.error ?? ""}`);
+      if (!notLinked) throw err;
+      await auth.bindWithProvider({ provider_token });
+      await auth.signInWithProvider({ provider_token });
+    }
+    return true;
+  } finally {
+    // 无论成功失败都清掉 URL 上的回跳参数，避免每次刷新都重放授权码
+    history.replaceState(null, "", `${location.pathname}${location.hash}`);
+  }
 }
 
 /** 调用 ledgerApi 云函数，统一处理 ok/error 包装 */

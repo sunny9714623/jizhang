@@ -14,11 +14,15 @@ export function LoginGate({
   onSkip,
   onDemo,
   onLoggedIn,
+  onRetry,
+  onResetAuth,
 }: {
   error: string | null;
   onSkip: () => void;
   onDemo: () => void;
   onLoggedIn: () => void;
+  onRetry?: () => void;
+  onResetAuth?: () => void;
 }) {
   const [starting, setStarting] = useState(false);
   const [mode, setMode] = useState<"wx" | "email">("wx");
@@ -33,7 +37,16 @@ export function LoginGate({
     try {
       await startWechatLogin();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "微信登录暂不可用");
+      const raw = err instanceof Error ? err.message : String(err ?? "");
+      if (/not ?found|未配置|wx_open|login_type_disabled/i.test(raw)) {
+        setMode("email");
+        toast.error(
+          "微信开放平台登录尚未在 CloudBase 控制台开启，已为你切到邮箱登录（当前环境已可用）。开启微信登录需在控制台「身份认证 → 登录方式」配置微信开放平台 AppID/AppSecret。",
+          { duration: 6000 },
+        );
+      } else {
+        toast.error(raw || "微信登录暂不可用");
+      }
       setStarting(false);
     }
   };
@@ -149,21 +162,40 @@ export function LoginGate({
               </Button>
             </div>
             <p className="text-[11px] text-subtle">
-              需要先在 CloudBase 控制台开启「邮箱验证码登录」
+              当前环境已开启邮箱验证码登录；收不到邮件时请到
+              CloudBase 控制台「身份认证 → 登录方式」检查邮件发送配置。
             </p>
           </div>
         ) : null}
 
         {error ? (
-          <p className="mt-3 rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
-            云端初始化失败：{error}
-            <br />
-            请确认已部署云函数并在控制台启用微信登录。
-          </p>
+          <div className="mt-3 rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
+            <p>
+              <span className="font-semibold">云端初始化失败：</span>
+              {error}
+            </p>
+            <p className="mt-1 text-danger/85">
+              若之前登录过，可能是浏览器残留了失效的登录状态；清除后重新登录即可（邮箱验证码登录已开启）。
+            </p>
+            <div className="mt-2 flex gap-2">
+              {onResetAuth ? (
+                <Button type="button" size="sm" variant="secondary" onClick={onResetAuth}>
+                  清除登录状态并重试
+                </Button>
+              ) : null}
+              {onRetry ? (
+                <Button type="button" size="sm" variant="secondary" onClick={onRetry}>
+                  重新连接
+                </Button>
+              ) : null}
+            </div>
+          </div>
         ) : (
-          <p className="mt-3 text-center text-[11px] text-subtle">
-            需要先在 CloudBase 控制台配置微信开放平台登录（AppID/AppSecret）
-          </p>
+          <div className="mt-3 space-y-1 text-center text-[11px] text-subtle">
+            <p>
+              邮箱登录已可用；微信登录需先在 CloudBase 控制台开启微信开放平台登录（AppID/AppSecret）。
+            </p>
+          </div>
         )}
       </div>
 

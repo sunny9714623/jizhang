@@ -121,6 +121,7 @@ function Home() {
   const setLocalOnly = useCloud((s) => s.setLocalOnly);
   const enterDemo = useCloud((s) => s.enterDemo);
   const reload = useCloud((s) => s.reload);
+  const resetAuth = useCloud((s) => s.resetAuth);
 
   useEffect(() => {
     void cloudBoot();
@@ -149,6 +150,8 @@ function Home() {
             onSkip={() => setLocalOnly(true)}
             onDemo={enterDemo}
             onLoggedIn={() => void reload()}
+            onRetry={() => void reload()}
+            onResetAuth={() => void resetAuth()}
           />
           <Toaster
             theme="light"

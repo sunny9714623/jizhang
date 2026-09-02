@@ -10,9 +10,10 @@ import {
   removeMember,
 } from "./api";
 import {
+  clearCloudAuth,
   getCurrentUser,
   handleWechatCallback,
-  signOutCloud,
+  isAuthStateError,
 } from "./index";
 import type { CloudFamily, CloudInvite, CloudUser, FamilyMember } from "./types";
 
@@ -43,6 +44,7 @@ type CloudState = {
   enterDemo: () => void;
   exitDemo: () => void;
   reload: () => Promise<void>;
+  resetAuth: () => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -67,6 +69,23 @@ const DEMO_FAMILY: CloudFamily = {
   createdAt: Date.now(),
 };
 
+/** 把 CloudBase 原生错误转成对用户友好的提示 */
+function friendlyBootError(raw: unknown): string {
+  const s =
+    typeof raw === "string"
+      ? raw
+      : raw instanceof Error
+        ? raw.message
+        : JSON.stringify(raw ?? "");
+  if (/登录方式未开启|login_type_disabled|provider .* not ?found/i.test(s)) {
+    return "登录方式未开启：请先在 CloudBase 控制台开启邮箱/微信登录（邮箱验证码当前已可用），再返回重试。";
+  }
+  if (/RESOURCE_NOT_FOUND|FUNCTIONS_NOT_FOUND|not ?found|reource/i.test(s)) {
+    return "云端资源未找到：云函数或登录身份源尚未就绪。请确认 ledgerApi / agentApi 已部署、登录方式已在控制台开启；若只是残留了失效的旧登录状态，点下方「清除登录状态」即可恢复。";
+  }
+  return s || "云端初始化失败，请稍后重试";
+}
+
 export const useCloud = create<CloudState>((set, get) => ({
   ready: false,
   localOnly:
@@ -86,16 +105,28 @@ export const useCloud = create<CloudState>((set, get) => ({
     if (get().ready) return;
     try {
       await handleWechatCallback();
-    } catch {
-      // 回跳失败时继续走正常流程
+    } catch (err) {
+      console.warn("[cloud] wechat callback failed, continue as normal", err);
     }
     try {
       const user = await getCurrentUser();
       if (!user?.uid) {
-        set({ ready: true, user: null });
+        set({ ready: true, user: null, error: null });
         return;
       }
-      const profile = await fetchProfile();
+      let profile;
+      try {
+        profile = await fetchProfile();
+      } catch (err) {
+        // 本地缓存了用户但平台侧登录态已失效：自动清理并回到登录页，避免每次都卡在初始化失败
+        if (isAuthStateError(err)) {
+          console.warn("[cloud] invalid login state, clearing and asking to re-login", err);
+          await clearCloudAuth();
+          set({ ready: true, user: null, error: null });
+          return;
+        }
+        throw err;
+      }
       set({ user: profile.user, families: profile.families, roles: profile.roles });
       const families = profile.families ?? [];
       let activeFamilyId =
@@ -128,7 +159,7 @@ export const useCloud = create<CloudState>((set, get) => ({
       console.error("[cloud] boot failed", err);
       set({
         ready: true,
-        error: err instanceof Error ? err.message : "云端初始化失败",
+        error: friendlyBootError(err),
       });
     }
   },
@@ -333,7 +364,25 @@ export const useCloud = create<CloudState>((set, get) => ({
   },
 
   reload: async () => {
-    set({ ready: false, user: null });
+    set({ ready: false, user: null, error: null });
+    await get().boot();
+  },
+
+  resetAuth: async () => {
+    await clearCloudAuth();
+    localStorage.removeItem(ACTIVE_KEY);
+    set({
+      ready: false,
+      demo: false,
+      user: null,
+      families: [],
+      roles: {},
+      activeFamilyId: null,
+      activeLedgerId: null,
+      members: [],
+      invite: null,
+      error: null,
+    });
     await get().boot();
   },
 
@@ -342,7 +391,7 @@ export const useCloud = create<CloudState>((set, get) => ({
       get().exitDemo();
       return;
     }
-    await signOutCloud();
+    await clearCloudAuth();
     localStorage.removeItem(ACTIVE_KEY);
     set({
       localOnly: false,
