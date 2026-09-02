@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { agentAsk } from "@/lib/agent-server";
+import { agentTurn } from "@/lib/agent-transport";
 import { agentContext } from "@/lib/agent-context";
 import { dbGetMeta, dbSetMeta } from "@/lib/ledger-db";
 import { fileToJpegDataUrl, useLedger } from "@/lib/ledger-store";
@@ -183,19 +183,17 @@ export function AgentFloatingChat() {
 
     let result;
     try {
-      result = await agentAsk({
-        data: {
-          key: savedKey || undefined,
-          msgs: history,
-          image: image ?? null,
-          context: agentContext(),
-        },
+      result = await agentTurn({
+        key: savedKey || undefined,
+        msgs: history,
+        image: image ?? null,
+        context: agentContext(),
       });
     } catch (err) {
       const raw = err instanceof Error ? err.message : "";
       const staticNote =
         /404|not found|fetch failed|failed to fetch|load failed|network error/i.test(raw)
-          ? "AI 服务当前不可用：纯静态托管没有后端。请用 npm run dev 本地运行，或部署到带服务端的平台（如 Vercel）后再试。"
+          ? "AI 服务当前不可用：纯静态托管没有后端。请用 npm run dev 本地运行，或部署到带服务端的平台（如 Vercel / CloudBase 云函数）后再试。"
           : raw;
       result = {
         ok: false as const,

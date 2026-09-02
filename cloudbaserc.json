@@ -12,6 +12,13 @@
       "runtime": "Nodejs16.13",
       "installDependency": true,
       "envVariables": {}
+    },
+    {
+      "name": "agentApi",
+      "timeout": 120,
+      "runtime": "Nodejs16.13",
+      "installDependency": true,
+      "envVariables": {}
     }
   ],
   "hosting": {

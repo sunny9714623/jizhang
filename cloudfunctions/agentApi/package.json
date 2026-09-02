@@ -1,0 +1,7 @@
+{
+  "name": "agentApi",
+  "version": "1.0.0",
+  "description": "月梨账单云函数：AI 记账助手 DeepSeek 代理",
+  "main": "index.js",
+  "private": true
+}

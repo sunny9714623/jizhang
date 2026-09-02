@@ -74,3 +74,38 @@ tcb hosting deploy dist/client
 - 只有家庭成员能读/写该家庭账本（云函数内校验，不信任前端）。
 - 创建人是 owner，可以查看邀请码、移除成员；普通成员只能记账和看账。
 - 成员被移除后，历史流水保留在家庭账本里。
+
+## 六、AI 记账助手（DeepSeek 云函数）
+
+静态托管本身没有 Node 服务端，浏览器的「AI 记账助手」调用会失败。CloudBase
+方案是加一个专用云函数 `agentApi`，由它代理调用 DeepSeek（文本
+`deepseek-v4-flash`，截图 `deepseek-v4-flash-vision-exp`），Key 只存在云函数环境变量里。
+
+### 部署步骤
+
+```bash
+# 1. 构建静态前端（会自动带上 CloudBase 调用分支）
+npm run build:cloudbase
+
+# 2. 部署 agentApi 云函数
+tcb functions:deploy agentApi
+
+# 3. 配置 DeepSeek Key（云函数环境变量）
+#    CloudBase 控制台 → 云函数 → agentApi → 函数配置/环境变量：
+#    DEEPSEEK_API_KEY = sk-你的key
+#    保存后点「更新并重新部署」让环境变量生效。
+#    可选：DEEPSEEK_MODEL、DEEPSEEK_VISION_MODEL
+
+# 4. 部署静态前端
+tcb hosting deploy dist/client
+```
+
+部署完成后，用已登录的账号打开页面即可使用助手（云函数调用需要登录态；
+「先看看效果/本地使用」等未登录模式无法调用云端 AI，请用 `npm run dev`
+在本机体验）。云函数、前端和 DeepSeek 之间的调用都在同一环境的安全域名内。
+
+注意：
+
+- `DEEPSEEK_API_KEY` 只配置在云函数环境变量里，不要写进 `cloudbaserc.json` 或提交到仓库；
+- `agentApi` 不需要数据库权限，只做 DeepSeek 代理，超时已设置为 120 秒；
+- 前端会自动区分构建类型：CloudBase 构建走云函数，本地 `npm run dev` / Vercel 走应用自带服务端函数，GitHub Pages 纯静态会提示 AI 不可用。

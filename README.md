@@ -43,4 +43,4 @@ npm run build
 - 文本模型默认 `deepseek-v4-flash`，截图识别默认 `deepseek-v4-flash-vision-exp`。
 - Key 需要手动配置（环境变量优先）：在启动服务的环境里设置 `DEEPSEEK_API_KEY`（可选 `DEEPSEEK_MODEL` / `DEEPSEEK_VISION_MODEL` 覆盖模型）；或在应用里点助手右上角“连接”粘贴 Key——只保存在当前浏览器的本地数据库。
 - 语音识别使用浏览器内置能力（Chrome / Edge），不需要额外密钥。
-- GitHub Pages 是纯静态托管、没有服务端，AI 调用会提示不可用；需要 AI 功能请运行本地开发服务或部署到带服务端的平台（如 Vercel）。
+- GitHub Pages 是纯静态托管、没有服务端，AI 调用会提示不可用；需要 AI 功能请运行本地开发服务、部署到 Vercel，或使用 CloudBase 云函数方案（见 CLOUDBASE.md 的「AI 记账助手」一节）。

@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 const env = {
   ...process.env,
   VITE_PAGES: "1",
+  VITE_CLOUDBASE: "1",
   VITE_BASE_PATH: "/",
   NITRO_PRESET: "static",
 };
