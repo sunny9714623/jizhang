@@ -36,8 +36,8 @@ function ok(data) {
   return { ok: true, ...data };
 }
 
-function fail(error) {
-  return { ok: false, error };
+function fail(error, extra) {
+  return extra ? { ok: false, error, ...extra } : { ok: false, error };
 }
 
 function makeId() {
@@ -376,6 +376,37 @@ async function handleSetup() {
   return ok({ collections: status });
 }
 
+async function handleDbProbe() {
+  // 诊断用：直接验证数据库读写是否可用
+  const id = `probe-${Date.now().toString(36)}`;
+  const readBefore = await db
+    .collection("users")
+    .doc(id)
+    .get()
+    .then(() => "ok")
+    .catch((e) => `err:${e.code || e.errCode || "?"}`);
+  const setRes = await db
+    .collection("users")
+    .doc(id)
+    .set({ uid: id, probe: 1, createdAt: now() })
+    .then(() => "ok")
+    .catch((e) => `err:${e.code || e.errCode || "?"}:${String(e.message || "").slice(0, 200)}`);
+  const readAfter = await db
+    .collection("users")
+    .doc(id)
+    .get()
+    .then((r) => (r && r.data ? "ok" : "empty"))
+    .catch((e) => `err:${e.code || e.errCode || "?"}`);
+  if (String(setRes).startsWith("ok")) {
+    await db
+      .collection("users")
+      .doc(id)
+      .remove()
+      .catch(() => {});
+  }
+  return ok({ id, readBefore, setRes, readAfter });
+}
+
 exports.main = async (event = {}) => {
   const { action } = event;
   try {
@@ -403,12 +434,22 @@ exports.main = async (event = {}) => {
         return await handleImportLocal(event);
       case "setup":
         return await handleSetup();
+      case "dbprobe":
+        return await handleDbProbe();
       default:
         return fail("未知操作");
     }
   } catch (err) {
     if (err && err.status === 401) return fail(err.message);
     console.error("[ledgerApi]", action, err);
-    return fail(err && err.message ? err.message : "服务器错误");
+    const raw = err && (err.stack || err.message) ? String(err.stack || err.message) : "服务器错误";
+    return fail(
+      err && err.message ? err.message : "服务器错误",
+      {
+        where: action || "?",
+        detail: raw.slice(0, 600),
+        code: err && (err.code || err.errCode || err.errorCode) ? String(err.code || err.errCode || err.errorCode).slice(0, 120) : undefined,
+      },
+    );
   }
 };
