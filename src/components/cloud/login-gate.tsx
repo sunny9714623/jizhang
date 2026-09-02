@@ -37,7 +37,23 @@ export function LoginGate({
     try {
       await startWechatLogin();
     } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err ?? "");
+      const obj = (err ?? {}) as Record<string, unknown>;
+      const pieces = [
+        obj.error_description,
+        obj.error,
+        obj.message,
+        obj.errMsg,
+        obj.code,
+        obj.status,
+      ]
+        .map((v) => (typeof v === "string" ? v : ""))
+        .filter(Boolean);
+      const raw =
+        typeof err === "string"
+          ? err
+          : pieces.length > 0
+            ? pieces.join(" ")
+            : String(err ?? "");
       if (/not ?found|未配置|wx_open|login_type_disabled/i.test(raw)) {
         setMode("email");
         toast.error(
@@ -45,7 +61,7 @@ export function LoginGate({
           { duration: 6000 },
         );
       } else {
-        toast.error(raw || "微信登录暂不可用");
+        toast.error(raw || "微信登录暂不可用", { duration: 5000 });
       }
       setStarting(false);
     }
