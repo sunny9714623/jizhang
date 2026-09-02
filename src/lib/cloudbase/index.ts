@@ -1,7 +1,7 @@
 import cloudbase from "@cloudbase/js-sdk";
 
 /** CloudBase 环境 ID（腾讯云开发控制台 → 环境） */
-export const CLOUDBASE_ENV = "jizhang-d0gp59eet1dd1ceac";
+export const CLOUDBASE_ENV = "jizhang-d4gdo6g124cd815b5";
 /** 环境所在地域（上海） */
 export const CLOUDBASE_REGION = "ap-shanghai";
 
