@@ -11,11 +11,6 @@ import type {
 const API_URL = "https://api.deepseek.com/chat/completions";
 const DEFAULT_TEXT_MODEL = "deepseek-v4-flash";
 const DEFAULT_VISION_MODEL = "deepseek-v4-flash-vision-exp";
-/**
- * 内置默认 Key（按用户要求写入，仅供本地/自有部署使用）。
- * 线上部署请用环境变量 DEEPSEEK_API_KEY 覆盖，环境变量优先。
- */
-const DEFAULT_API_KEY = "";
 
 type TextPart = { type: "text"; text: string };
 type ImagePart = { type: "image_url"; image_url: { url: string } };
@@ -24,7 +19,7 @@ function pickKey(supplied?: string): string | undefined {
   const env = process.env.DEEPSEEK_API_KEY?.trim();
   if (env) return env;
   const local = supplied?.trim();
-  return local || DEFAULT_API_KEY;
+  return local || undefined;
 }
 
 function textModels(): string[] {

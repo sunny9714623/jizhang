@@ -439,7 +439,7 @@ export function AgentFloatingChat() {
             </Button>
           </div>
           <p className="mt-2 text-xs leading-relaxed text-subtle">
-            不填也能用：默认 Key 已内置，仅在当前机器有效；线上部署请改用环境变量 DEEPSEEK_API_KEY（优先）。
+            未配置时助手会提示设置。推荐在启动服务的环境里配置 DEEPSEEK_API_KEY（环境变量优先）；也可以在这里粘贴 Key，仅保存在当前浏览器的本地数据库。
             {savedKey ? (
               <button type="button" className="ml-2 text-muted underline" onClick={removeKey}>
                 移除本机 Key
