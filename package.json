@@ -11,6 +11,7 @@
     "build": "node scripts/with-app-env.mjs vite build && npm run db:migrate",
     "db:migrate": "node scripts/migrate.mjs",
     "build:cloudbase": "node scripts/build-cloudbase.mjs",
+    "build:static": "node scripts/with-app-env.mjs vite build && node scripts/static-ssg.mjs",
     "build:dev": "node scripts/with-app-env.mjs vite build --mode development",
     "preview": "node scripts/with-app-env.mjs vite preview",
     "preview:pages": "node scripts/serve-static.mjs",

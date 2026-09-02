@@ -180,9 +180,12 @@ export default defineConfig(({ command, isPreview }) => ({
     grokPwaPlugin(),
     tailwindcss(),
     tanstackStart({
-      // Static GitHub Pages builds prerender `/` to HTML via the framework's
-      // own prerenderer; the Nitro server build (Vercel) does not prerender.
-      prerender: isVercelBuild ? undefined : { enabled: true },
+      // Framework prerender is DISABLED: its static flow fetches the built
+      // client output before any index.html exists and 404s
+      // ("Failed to fetch /: Not Found"), failing every static build.
+      // Static index.html is emitted post-build by scripts/static-ssg.mjs,
+      // which calls the real SSR handler and writes the full page.
+      prerender: { enabled: false },
     }),
     ...(command === "build" || isPreview
       ? isVercelBuild

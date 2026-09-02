@@ -21,4 +21,14 @@ const child = spawn(
   { stdio: "inherit", env, shell: false },
 );
 
-child.on("exit", (code) => process.exit(code ?? 1));
+child.on("exit", (code) => {
+  if (code !== 0) process.exit(code ?? 1);
+  // The framework prerender can't emit index.html (see static-ssg.mjs), so
+  // render the page via the built SSR handler and write dist/client/index.html.
+  const ssg = spawn(process.execPath, ["./scripts/static-ssg.mjs"], {
+    stdio: "inherit",
+    env,
+    shell: false,
+  });
+  ssg.on("exit", (ssgCode) => process.exit(ssgCode ?? 1));
+});
