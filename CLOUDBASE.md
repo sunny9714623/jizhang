@@ -7,11 +7,11 @@
 - 云开发数据库：`users` / `families` / `family_members` / `invitations` / `ledgers` / `transactions`
 - 身份认证：微信开放平台网页登录
 
-环境 ID：`jizhang-d0gp59eet1dd1ceac`
+环境 ID：`lxh-d9g0yz4st2a85197f`
 
 ## 一、控制台配置（一次性）
 
-1. 打开 [腾讯云开发控制台](https://console.cloud.tencent.com/tcb)，进入环境 `jizhang-d0gp59eet1dd1ceac`。
+1. 打开 [腾讯云开发控制台](https://console.cloud.tencent.com/tcb)，进入环境 `lxh-d9g0yz4st2a85197f`。
 2. **身份认证 → 登录方式**：
    - 启用「微信开放平台」登录，填入你在 [微信开放平台](https://open.weixin.qq.com) 注册的**网站应用** AppID 和 AppSecret。
    - 微信开放平台的网站应用需要企业/组织认证，并把网站的**授权回调域名**配好。
