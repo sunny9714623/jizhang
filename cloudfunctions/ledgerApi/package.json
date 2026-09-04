@@ -1,11 +1,11 @@
 {
   "name": "ledgerApi",
   "version": "1.0.0",
-  "description": "月梨账单云函数：家庭共享、成员管理、流水读写",
+  "description": "月梨账单云函数：家庭共享、成员管理、流水读写（CloudBase JS SDK / PostgreSQL）",
   "main": "index.js",
   "private": true,
   "dependencies": {
-    "@cloudbase/node-sdk": "^2.9.0",
-    "pg": "^8.16.3"
+    "@cloudbase/js-sdk": "^3.8.2",
+    "@cloudbase/node-sdk": "^2.9.0"
   }
 }

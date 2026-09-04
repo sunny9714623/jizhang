@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { ChartColumn, Coins, LayoutGrid, MessageCircle, Moon, Plus, Sun, WalletCards } from "lucide-react";
+import { ChartColumn, LayoutGrid, MessageCircle, Moon, Plus, Sun, User, WalletCards } from "lucide-react";
 import { Toaster } from "sonner";
 import { Composer } from "@/components/composer";
 import { RestoreSheet } from "@/components/restore-sheet";
@@ -104,11 +104,13 @@ function Home() {
   const tab = useLedger((s) => s.tab);
   const setTab = useLedger((s) => s.setTab);
   const month = useLedger((s) => s.month);
+  const cloudLedgers = useLedger((s) => s.cloudLedgers);
   const openComposer = useLedger((s) => s.openComposer);
   const wallpaper = useLedger((s) => s.wallpaper);
   const dark = useLedger((s) => s.dark);
   const toggleDark = useLedger((s) => s.toggleDark);
   const cloudActivate = useLedger((s) => s.cloudActivate);
+  const cloudPull = useLedger((s) => s.cloudPull);
   const photoWall = isPhotoWall(wallpaper);
   const lightTitle = wallNeedsLightText(wallpaper);
 
@@ -126,6 +128,21 @@ function Home() {
   useEffect(() => {
     void cloudBoot();
   }, [cloudBoot]);
+
+  useEffect(() => {
+    if (!cloudUser || !cloudPull) return;
+    const pullIfVisible = () => {
+      if (document.visibilityState === "visible") void cloudPull();
+    };
+    // 回到前台立刻拉取 + 家庭模式每 20 秒刷新一次，
+    // 这样其他家庭成员新增/修改/删除的流水能尽快出现，不必手动点“从云端拉取”。
+    document.addEventListener("visibilitychange", pullIfVisible);
+    const timer = window.setInterval(pullIfVisible, 20000);
+    return () => {
+      document.removeEventListener("visibilitychange", pullIfVisible);
+      window.clearInterval(timer);
+    };
+  }, [cloudUser, cloudPull]);
 
   useEffect(() => {
     if (!cloudReady) return;
@@ -202,9 +219,12 @@ function Home() {
               type="button"
               className="block w-full min-w-0 text-left"
               onClick={() => setTab("books")}
+              aria-label="打开账本管理"
             >
               <p className={cn("font-display text-3xl leading-tight", lightTitle ? "text-primary-fg" : "text-fg")}>
-                {ledgers.find((l) => l.id === ledgerId)?.name ?? "月梨账单"}
+                {ledgers.find((l) => l.id === ledgerId)?.name ??
+                  cloudLedgers.find((l) => l._id === ledgerId)?.name ??
+                  "月梨账单"}
               </p>
             </button>
             <p className={cn("mt-1 text-xs", lightTitle ? "text-primary-fg/80" : "text-muted")}>
@@ -244,7 +264,7 @@ function Home() {
           <TabBtn id="list" label="流水" icon={WalletCards} active={tab === "list"} onClick={setTab} />
           <TabBtn id="stats" label="统计" icon={ChartColumn} active={tab === "stats"} onClick={setTab} />
           <TabBtn id="import" label="入账" icon={MessageCircle} active={tab === "import"} onClick={setTab} />
-          <TabBtn id="more" label="家当" icon={Coins} active={tab === "more"} onClick={setTab} />
+          <TabBtn id="more" label="我的" icon={User} active={tab === "more"} onClick={setTab} />
         </nav>
 
         <AgentFloatingChat />

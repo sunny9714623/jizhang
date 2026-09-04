@@ -8,6 +8,9 @@ import {
   joinFamily,
   listMembers,
   removeMember,
+  renameFamilyCloud,
+  deleteFamilyCloud,
+  updateProfileCloud,
 } from "./api";
 import {
   clearCloudAuth,
@@ -39,6 +42,9 @@ type CloudState = {
   refreshMembers: (familyId: string) => Promise<void>;
   refreshInvite: (familyId: string) => Promise<void>;
   removeMember: (familyId: string, targetUid: string) => Promise<void>;
+  renameFamily: (familyId: string, name: string) => Promise<void>;
+  deleteFamily: (familyId: string) => Promise<void>;
+  updateProfile: (patch: { name?: string; avatar?: string }) => Promise<void>;
   setActiveFamily: (familyId: string) => void;
   setLocalOnly: (on: boolean) => void;
   enterDemo: () => void;
@@ -125,23 +131,29 @@ export const useCloud = create<CloudState>((set, get) => ({
           set({ ready: true, user: null, error: null });
           return;
         }
-        throw err;
+        // 登录态有效但 profile 调用临时失败（网络/慢）：先用 SDK 用户进入应用，
+        // 家庭列表稍后再拉取，避免刚登录还卡在登录页。
+        console.warn("[cloud] profile fetch failed, continue with sdk user", err);
+        profile = {
+          user: {
+            uid: (user as { uid?: string }).uid ?? "",
+            name: (user as { name?: string }).name ?? (user as { email?: string }).email ?? "用户",
+            avatar: (user as { avatar?: string; picture?: string }).avatar ?? (user as { picture?: string }).picture ?? "",
+          },
+          families: [],
+          roles: {},
+        };
       }
       set({ user: profile.user, families: profile.families, roles: profile.roles });
       const families = profile.families ?? [];
       let activeFamilyId =
         localStorage.getItem(ACTIVE_KEY) ??
         (families.length > 0 ? families[0]._id : null);
+      // 不再自动创建“我的家庭”：避免多出一个空家庭，把账本/流水带错家庭。
       let activeLedgerId: string | null = null;
-      if (!activeFamilyId) {
-        // 首次登录自动创建“我的家庭”，把共享功能走通
-        const created = await createFamily("我的家庭");
-        activeFamilyId = created.family._id;
-        activeLedgerId = created.ledgerId;
-      }
       if (activeFamilyId && !activeLedgerId) {
-        const tx = await fetchTx(activeFamilyId);
-        activeLedgerId = tx.ledgers[0]?._id ?? null;
+        const tx = await fetchTx(activeFamilyId, undefined, true);
+        activeLedgerId = tx.ledgerId ?? tx.ledgers[0]?._id ?? null;
       }
       if (activeFamilyId) {
         localStorage.setItem(ACTIVE_KEY, activeFamilyId);
@@ -292,6 +304,77 @@ export const useCloud = create<CloudState>((set, get) => ({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "移除失败");
       throw err;
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  renameFamily: async (familyId, name) => {
+    set({ busy: true });
+    try {
+      const res = await renameFamilyCloud(familyId, name);
+      set({
+        families: get().families.map((f) => (f._id === familyId ? res.family : f)),
+      });
+      toast.success("家庭已改名");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "改名失败");
+      throw err;
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  deleteFamily: async (familyId) => {
+    set({ busy: true });
+    try {
+      await deleteFamilyCloud(familyId);
+      const families = get().families.filter((f) => f._id !== familyId);
+      const roles = { ...get().roles };
+      delete roles[familyId];
+      if (get().activeFamilyId === familyId) {
+        localStorage.removeItem(ACTIVE_KEY);
+        set({
+          families,
+          roles,
+          activeFamilyId: null,
+          activeLedgerId: null,
+          members: [],
+          invite: null,
+        });
+      } else {
+        set({ families, roles });
+      }
+      toast.success("家庭已删除");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "删除失败");
+      throw err;
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  updateProfile: async (patch) => {
+    const me = get().user;
+    if (get().demo && me) {
+      const next = { ...me };
+      if (patch.name !== undefined) next.name = patch.name;
+      if (patch.avatar !== undefined) next.avatar = patch.avatar;
+      set({ user: next });
+      toast.success("（体验模式）资料已更新，仅存本机");
+      return;
+    }
+    if (!me) {
+      toast.error("请先登录");
+      return;
+    }
+    set({ busy: true });
+    try {
+      const res = await updateProfileCloud(patch);
+      set({ user: res.user });
+      toast.success("资料已更新");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "更新失败");
     } finally {
       set({ busy: false });
     }

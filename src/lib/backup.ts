@@ -13,6 +13,7 @@ export type Snapshot = {
   recurring: Recurring[];
   accounts: Account[];
   cats: CatLeaf[];
+  catBag?: Record<string, CatLeaf[]>;
   ledgers: LedgerFile[];
   ledgerId: string;
   kinds: KindDef[];
@@ -74,6 +75,7 @@ export function snapshotFrom(state: {
   recurring: Recurring[];
   accounts: Account[];
   cats: CatLeaf[];
+  catBag: Record<string, CatLeaf[]>;
   ledgers: LedgerFile[];
   ledgerId: string;
   kinds: KindDef[];
@@ -93,6 +95,7 @@ export function snapshotFrom(state: {
     recurring: state.recurring,
     accounts: state.accounts,
     cats: state.cats,
+    catBag: state.catBag,
     ledgers: state.ledgers,
     ledgerId: state.ledgerId,
     kinds: state.kinds,
@@ -135,6 +138,7 @@ export type RestorePlan = {
   savedAt: number;
   groups: RestoreGroup[];
   cats?: CatLeaf[];
+  catBag?: Record<string, CatLeaf[]>;
   kinds?: KindDef[];
   wallpaper?: string | null;
   remindRecord?: boolean;
@@ -228,6 +232,7 @@ export async function parseRestoreFile(file: File): Promise<RestorePlan | null> 
     savedAt: snap.savedAt ?? Date.now(),
     groups: meaningful,
     cats: snap.cats,
+    catBag: snap.catBag,
     kinds: snap.kinds,
     wallpaper: snap.wallpaper,
     remindRecord: snap.remindRecord,

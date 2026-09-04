@@ -73,6 +73,21 @@ export type AgentContext = {
   recent: AgentTxBrief[];
   cats: AgentCategoryInfo[];
   upcoming: AgentRecurringBrief[];
+  /** 账本里出现过的每个月汇总（按月份升序），让 AI 能读到不止两个月的数据 */
+  months?: AgentMonthInfo[];
+  /** 账本整体跨度与合计 */
+  span?: {
+    firstMonth: string;
+    lastMonth: string;
+    count: number;
+    expenseFen: number;
+    incomeFen: number;
+  };
+  /** 当前查看月份所属“年”的全量逐笔流水（不做截断），供年度分析使用 */
+  year?: {
+    year: string;
+    txs: AgentTxBrief[];
+  };
 };
 
 export type AgentPayload = {

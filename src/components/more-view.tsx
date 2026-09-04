@@ -19,11 +19,15 @@ import { KindTags } from "@/components/kind-prefs";
 import { dueRecurring } from "@/lib/remind";
 import { useLedger } from "@/lib/ledger-store";
 import { cn } from "@/lib/utils";
-import { inLedger, txsInLedger } from "@/lib/ledgers";
+import { inLedger, txsInLedger, DEFAULT_LEDGER_ID } from "@/lib/ledgers";
 import { RestoreFileButton } from "@/components/restore-sheet";
 import { CloudPanel } from "@/components/cloud/family-panel";
+import { AccountSettings } from "@/components/account-settings";
+import { BooksView } from "@/components/ledger-dir";
 
 export function MoreView() {
+  const [familyOpen, setFamilyOpen] = useState(false);
+  const [booksOpen, setBooksOpen] = useState(false);
   const [perm, setPerm] = useState<NotificationPermission | "unsupported">("default");
   const remindRecord = useLedger((s) => s.remindRecord);
   const notifications = useLedger((s) => s.notifications);
@@ -33,7 +37,6 @@ export function MoreView() {
   const txs = useLedger((s) => s.txs);
   const cats = useLedger((s) => s.cats);
   const ledgerId = useLedger((s) => s.ledgerId);
-  const ledgers = useLedger((s) => s.ledgers);
   const kinds = useLedger((s) => s.kinds);
   const setRemindRecord = useLedger((s) => s.setRemindRecord);
   const exportBackup = useLedger((s) => s.exportBackup);
@@ -65,10 +68,37 @@ export function MoreView() {
 
   return (
     <div className="flex flex-col gap-5 pb-8">
-      <CloudPanel />
-      <p className="px-1 text-sm text-muted">
-        当前账本「{ledgers.find((l) => l.id === ledgerId)?.name ?? "月梨账单"}」。点顶部名称进入账本管理。
-      </p>
+      <AccountSettings />
+      <section className="rounded-xl bg-elevated px-4 py-4 shadow-[var(--shadow-border)]">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between"
+          onClick={() => setFamilyOpen((v) => !v)}
+        >
+          <span className="font-display text-xl text-fg">家庭</span>
+          <span className="text-xs text-muted">{familyOpen ? "收起" : "展开"}</span>
+        </button>
+        {familyOpen ? (
+          <div className="mt-4">
+            <CloudPanel />
+          </div>
+        ) : null}
+      </section>
+      <section className="rounded-xl bg-elevated px-4 py-4 shadow-[var(--shadow-border)]">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between"
+          onClick={() => setBooksOpen((v) => !v)}
+        >
+          <span className="font-display text-xl text-fg">账本管理</span>
+          <span className="text-xs text-muted">{booksOpen ? "收起" : "展开"}</span>
+        </button>
+        {booksOpen ? (
+          <div className="mt-4">
+            <BooksView />
+          </div>
+        ) : null}
+      </section>
 
       <CategoryPrefs />
 
@@ -310,7 +340,8 @@ function AccountForm({ onSave }: { onSave: (row: Account) => void }) {
 function RecurringList() {
   const all = useLedger((s) => s.recurring);
   const ledgerId = useLedger((s) => s.ledgerId);
-  const rows = inLedger(all, ledgerId);
+  // 定期账单展示全部（包含绑定到旧/其他账本 id 的），避免用户看不到。
+  const rows = all;
   const upsert = useLedger((s) => s.upsertRecurring);
   const remove = useLedger((s) => s.removeRecurring);
   const pay = useLedger((s) => s.payRecurring);

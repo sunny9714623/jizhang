@@ -1,5 +1,5 @@
 import { useLedger } from "@/lib/ledger-store";
-import { findGroup, findLeaf } from "@/lib/categories";
+import { DEFAULT_LEAVES, findGroup, findLeaf } from "@/lib/categories";
 import { cn } from "@/lib/utils";
 
 export function CatMark({
@@ -12,10 +12,11 @@ export function CatMark({
   className?: string;
 }) {
   const cats = useLedger((s) => s.cats);
-  const leaf = id ? findLeaf(cats, id) : undefined;
+  const leaf = id ? findLeaf(cats, id) ?? findLeaf(DEFAULT_LEAVES, id) : undefined;
   const g = group ? findGroup(group) : leaf ? findGroup(leaf.groupId) : undefined;
   const image = leaf?.image;
-  const emoji = leaf?.emoji || g?.emoji || "•";
+  const fallback = (leaf?.name || g?.name || "类").slice(0, 1);
+  const emoji = leaf?.emoji || g?.emoji || fallback || "•";
   if (image) {
     return (
       <img

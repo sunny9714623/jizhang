@@ -427,6 +427,7 @@ export function TxDetail() {
   const select = useLedger((s) => s.select);
   const remove = useLedger((s) => s.remove);
   const updateTx = useLedger((s) => s.updateTx);
+  const tab = useLedger((s) => s.tab);
   const tx = txs.find((t) => t.id === id);
   const [merchant, setMerchant] = useState("");
   const [day, setDay] = useState("");
@@ -442,8 +443,8 @@ export function TxDetail() {
     setAmount((tx.amountFen / 100).toFixed(2));
   }, [tx?.id, tx?.merchant, tx?.time, tx?.method, tx?.note, tx?.amountFen]);
   if (!tx) return null;
-  // 从首页、统计或流水列表打开都可以编辑，保证历史数据也能修改。
-  const canEdit = true;
+  // 只在「流水」页允许编辑/删除；概览/统计等其他页只读。
+  const canEdit = tab === "list";
   const dirty =
     merchant.trim() !== tx.merchant ||
     day !== shanghaiDayValue(tx.time) ||

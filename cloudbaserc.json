@@ -8,8 +8,8 @@
   "functions": [
     {
       "name": "ledgerApi",
-      "timeout": 20,
-      "runtime": "Nodejs16.13",
+      "timeout": 60,
+      "runtime": "Nodejs20.19",
       "installDependency": true,
       "envVariables": {}
     },
@@ -23,6 +23,9 @@
   ],
   "hosting": {
     "dir": "dist/client",
-    "ignore": [".git", "samples"]
+    "ignore": [
+      ".git",
+      "samples"
+    ]
   }
 }

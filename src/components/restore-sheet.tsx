@@ -50,10 +50,19 @@ export function RestoreSheet() {
     if (!plan) return;
     const next: Record<string, RestoreTarget> = {};
     for (const g of plan.groups) {
-      next[g.key] = { type: "new", name: g.name, folder: g.folder };
+      const wanted = (g.name || "").trim();
+      // 优先按“名字”匹配到已有同名账本，而不是按备份里的历史 id——
+      // 历史 id 在同步/重命名后可能指向别的账本，导致数据恢复进错账本（如 B1）。
+      const byName = ledgers.find((l) => l.name === wanted);
+      if (byName) {
+        // 已有同名/同 ID 的账本时默认并入现有，重复流水自动跳过，而不是再造一本重复账。
+        next[g.key] = { type: "existing", ledgerId: byName.id };
+      } else {
+        next[g.key] = { type: "new", name: g.name, folder: g.folder };
+      }
     }
     setTargets(next);
-  }, [plan]);
+  }, [plan, ledgers]);
 
   if (!plan) return null;
 

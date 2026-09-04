@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ClipboardPaste, FileSpreadsheet, HandCoins, ImagePlus } from "lucide-react";
+import { ClipboardPaste, FileSpreadsheet, HandCoins } from "lucide-react";
 import { formatYuan } from "@/lib/ledger";
 import { parsedToTx } from "@/lib/parse-bill";
 import { DEMO_MESSAGES } from "@/lib/parse-message";
@@ -9,11 +9,10 @@ import { CatMark } from "@/components/cat-mark";
 import { ChatBox } from "@/components/chat-box";
 import { cn } from "@/lib/utils";
 
-const ACCEPT = ".csv,.xls,.xlsx,.txt,image/jpeg,image/png,image/webp";
+const ACCEPT = ".csv,.xls,.xlsx,.txt";
 
 export function ImportView() {
   const inputRef = useRef<HTMLInputElement>(null);
-  const shotRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState("");
   const importFiles = useLedger((s) => s.importFiles);
   const preview = useLedger((s) => s.preview);
@@ -27,7 +26,6 @@ export function ImportView() {
   const readClipboard = useLedger((s) => s.readClipboard);
   const liveCapture = useLedger((s) => s.liveCapture);
   const setLiveCapture = useLedger((s) => s.setLiveCapture);
-  const ingesting = useLedger((s) => s.ingesting);
 
   const onFiles = (list: FileList | File[] | null) => {
     if (!list) return;
@@ -91,34 +89,7 @@ export function ImportView() {
           e.target.value = "";
         }}
       />
-      <input
-        ref={shotRef}
-        type="file"
-        accept="image/*"
-        className="sr-only"
-        onChange={(e) => {
-          onFiles(e.target.files);
-          e.target.value = "";
-        }}
-      />
-
       <ChatBox />
-
-      <section className="rounded-xl bg-elevated px-5 py-5 shadow-[var(--shadow-border)]">
-        <p className="font-display text-2xl text-fg">截图入账</p>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
-          支付成功页通常不能复制。把成功页截图保存到相册，在这里选图，对照金额和商家入册。
-        </p>
-        <Button
-          className="mt-4 w-full"
-          disabled={ingesting}
-          onClick={() => shotRef.current?.click()}
-        >
-          <ImagePlus />
-          {ingesting ? "正在打开截图" : "从相册选支付截图"}
-        </Button>
-        <p className="mt-3 text-center text-xs text-subtle">也可把截图拖到页面上</p>
-      </section>
 
       <section className="rounded-xl bg-elevated px-5 py-5 shadow-[var(--shadow-border)]">
         <p className="font-display text-2xl text-fg">粘贴支付消息</p>

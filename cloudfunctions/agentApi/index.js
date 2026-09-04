@@ -66,6 +66,7 @@ function httpsJson(path, headers, body) {
         res.on("data", (chunk) => chunks.push(chunk));
         res.on("end", () => {
           resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
             status: res.statusCode || 0,
             text: Buffer.concat(chunks).toString("utf8"),
           });
@@ -79,12 +80,35 @@ function httpsJson(path, headers, body) {
   });
 }
 
+/** 把以“元”为单位的数值（或字符串）换算成分 */
 function toFen(value) {
   if (typeof value === "number" && Number.isFinite(value)) {
     if (value > 0 && value < 100000000) return Math.round(value * 100);
   }
   if (typeof value === "string") {
-    const n = Number.parseFloat(value.replace(/[¥￥,\s元分]/g, ""));
+    const n = Number.parseFloat(value.replace(/[¥￥,\s元]/g, ""));
+    if (Number.isFinite(n) && n > 0) return Math.round(n * 100);
+  }
+  return 0;
+}
+
+/**
+ * amountFen 约定单位是“分”：整数分直接采用（避免再把 1990 分 ×100 变成 1990 元）；
+ * 若模型把金额写成了带小数的“元”（如 19.9），仍按“元”转成分。
+ */
+function fenOf(raw) {
+  const v = raw.amountFen;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v) || v <= 0 || v >= 100000000) return 0;
+    return Number.isInteger(v) ? v : Math.round(v * 100);
+  }
+  if (typeof v === "string") {
+    const s = v.replace(/[,，\s]/g, "").trim();
+    if (/分$/.test(s)) {
+      const n = Number(s.slice(0, -1));
+      return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+    }
+    const n = Number.parseFloat(s.replace(/[¥￥元]/g, ""));
     if (Number.isFinite(n) && n > 0) return Math.round(n * 100);
   }
   return 0;
@@ -92,7 +116,7 @@ function toFen(value) {
 
 function normalizeDraft(raw, cats) {
   if (!raw || typeof raw !== "object") return null;
-  const amountFen = toFen(raw.amountFen) || toFen(raw.amount) || toFen(raw.money);
+  const amountFen = fenOf(raw) || toFen(raw.amount) || toFen(raw.money);
   if (!amountFen || amountFen > 100000000) return null;
   const direction = raw.direction === "income" ? "income" : "expense";
   const list = Array.isArray(cats) ? cats : [];
@@ -117,14 +141,43 @@ function normalizeDraft(raw, cats) {
 }
 
 function firstJson(raw) {
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
-  try {
-    return JSON.parse(raw.slice(start, end + 1));
-  } catch {
-    return null;
+  const text = String(raw || "");
+  const start = text.indexOf("{");
+  if (start < 0) return null;
+  // 逐个右括号尝试，取“从第一个 { 开始、最先能解析成功”的 JSON，
+  // 兼容模型在 JSON 后额外输出说明文字等情况。
+  for (let i = start; i < text.length; i += 1) {
+    if (text[i] !== "}") continue;
+    try {
+      const parsed = JSON.parse(text.slice(start, i + 1));
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      /* 未闭合，继续向后找 */
+    }
   }
+  return null;
+}
+
+/** 清理模型回复里的“reply:”、多余引号、字面量 \n 等杂质 */
+function cleanReply(raw) {
+  let s = String(raw == null ? "" : raw)
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "")
+    .trim();
+  if (!s) return "";
+  s = s.replace(/^\s*(?:reply|回复|result|answer)\s*[:：]\s*/i, "").trim();
+  if (s.length > 1 && /^["“”]/.test(s) && /["“”]$/.test(s)) s = s.slice(1, -1);
+  s = s.replace(/```[a-zA-Z]*\s*/g, "").trim();
+  return s.slice(0, 4000);
+}
+
+/** 模型没按 JSON 输出时，尽力取出可读文本当回复 */
+function replyFallback(raw) {
+  const t = String(raw == null ? "" : raw);
+  const quoted = t.match(/"(?:reply|answer|analysis|result|content)"\s*[:：]\s*"((?:\\.|[^"\\])*)"/i);
+  if (quoted && quoted[1]) return quoted[1];
+  if (t.trim().startsWith("{")) return t;
+  return t;
 }
 
 function systemPrompt(context) {
@@ -149,6 +202,7 @@ function systemPrompt(context) {
 - 分析类请求（如“分析本月支出/给建议”）：reply 用 Markdown，允许短段落和“- ”无序列表，可用 **加粗** 突出关键数字；引用本月支出、收入、结余、日均、最大分类占比、与上月的变化，再给 2-4 条具体可执行的建议；不要用标题语法（#）。
 - 提问与闲聊：直接简明回答，可引用账本里的真实数据。
 - reply 一般不超过 600 字。
+- 数据都在下方 [账本数据] 里：months 是账本全部月份的汇总（从最旧到最新），recent 是最近流水，upcoming 是近期待付，year 是用户所选年份的每一笔完整流水（未截断、可能很长，做年度分析时务必基于它逐笔分析）；只能引用其中的数字，不能编造。
 
 只输出一个 JSON 对象（不要输出 JSON 以外的内容）：
 {"reply": "…", "drafts": [{"date":"YYYY-MM-DD","amountFen":2380,"direction":"expense","merchant":"瑞幸","category":"food","note":"…"}]}
@@ -182,10 +236,10 @@ function humanStatus(status) {
   return `DeepSeek 返回 ${status}`;
 }
 
-async function requestTurn(models, apiKey, system, history, userText, image, cats) {
+async function requestTurn(models, apiKey, system, history, userText, image, cats, reminder) {
   let lastDetail = "";
   for (const model of models) {
-    const messages = [{ role: "system", content: system }];
+    const messages = [{ role: "system", content: system + (reminder || "") }];
     for (const m of history) {
       messages.push({ role: m.role, content: m.text });
     }
@@ -232,14 +286,31 @@ async function requestTurn(models, apiKey, system, history, userText, image, cat
     } catch {
       return fail("bad_reply", "模型返回的内容无法解析，请重试一次");
     }
-    const raw = body.choices && body.choices[0] && body.choices[0].message
-      ? body.choices[0].message.content
-      : "";
-    const json = firstJson(String(raw || ""));
+    const rawText = String(
+      body.choices && body.choices[0] && body.choices[0].message
+        ? body.choices[0].message.content
+        : "",
+    )
+      .replace(/^\s*```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/, "")
+      .trim();
+    const json = firstJson(rawText);
+    // 模型没有按 JSON 输出但给了可读文本（分析/闲聊）时，直接把文本作为回复
     if (json === null || typeof json !== "object") {
+      const plain = cleanReply(replyFallback(rawText));
+      if (plain) return ok({ reply: plain, drafts: [] });
       return fail("bad_reply", "模型返回的内容没有解析出结果，请重试一次");
     }
-    const reply = typeof json.reply === "string" ? json.reply.trim().slice(0, 4000) : "";
+    let reply = "";
+    const REPLY_KEYS = ["reply", "answer", "analysis", "result", "content", "summary", "text"];
+    for (const k of REPLY_KEYS) {
+      const v = json[k];
+      const cleaned = typeof v === "string" ? cleanReply(v) : "";
+      if (cleaned) {
+        reply = cleaned;
+        break;
+      }
+    }
     const drafts = [];
     if (Array.isArray(json.drafts)) {
       for (const d of json.drafts.slice(0, 20)) {
@@ -248,7 +319,9 @@ async function requestTurn(models, apiKey, system, history, userText, image, cat
       }
     }
     if (!reply && drafts.length === 0) {
-      return fail("bad_reply", "模型没有给出有效回答，请换个说法再试");
+      const plain = cleanReply(replyFallback(rawText));
+      if (plain) return ok({ reply: plain, drafts });
+      return fail("bad_reply", "模型没有给出有效回答，请换个说法重试");
     }
     return ok({ reply: reply || `已整理出 ${drafts.length} 笔，请在下方确认后入账`, drafts });
   }
@@ -286,7 +359,7 @@ exports.main = async (event = {}) => {
       ? "请识别这张支付/账单截图，把金额最大、最醒目的一笔整理成记账草稿。"
       : lastText;
   try {
-    return await requestTurn(
+    let result = await requestTurn(
       image ? visionModels() : textModels(),
       apiKey,
       systemPrompt(context),
@@ -294,7 +367,22 @@ exports.main = async (event = {}) => {
       userText,
       image,
       context.cats,
+      "",
     );
+    // 一次解析失败时，带着“严格 JSON”提醒自动重试一次，降低偶发的“请重试”体验
+    if (result && result.ok === false && result.code === "bad_reply") {
+      result = await requestTurn(
+        image ? visionModels() : textModels(),
+        apiKey,
+        systemPrompt(context),
+        history,
+        userText,
+        image,
+        context.cats,
+        "\n\n【系统提醒】你上次的回复没能被解析。请只输出一个严格 JSON 对象（不要 Markdown、不要多余文字）：{\"reply\":\"回复内容\",\"drafts\":[]}",
+      );
+    }
+    return result;
   } catch (err) {
     console.error("[agentApi]", err);
     return fail("upstream", err && err.message ? err.message : "服务器错误");

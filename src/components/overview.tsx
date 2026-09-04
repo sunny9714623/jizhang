@@ -5,7 +5,7 @@ import {
   monthKey,
   shanghaiDate,
 } from "@/lib/ledger";
-import { leafColor } from "@/lib/categories";
+import { leafColor, leafLabel } from "@/lib/categories";
 import { daysUntil } from "@/lib/models";
 import { dueRecurring, recordedToday } from "@/lib/remind";
 import { monthStats, useLedger } from "@/lib/ledger-store";
@@ -59,7 +59,7 @@ export function Overview() {
     if (catRows.some((c) => c.id === id)) continue;
     catRows.push({
       id,
-      name: cats.find((c) => c.id === id)?.name ?? id,
+      name: leafLabel(cats, id),
       fen,
       count: stats.countByCat.get(id) ?? 0,
       color: leafColor(id),
@@ -111,7 +111,6 @@ export function Overview() {
           今天还没记账，点这里十秒记一笔
         </button>
       ) : null}
-
       {due.length > 0 ? (
         <section className="rounded-xl bg-elevated px-4 py-3 shadow-[var(--shadow-border)]">
           <p className="font-display text-lg text-fg">到期账单</p>

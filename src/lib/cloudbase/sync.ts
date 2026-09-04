@@ -23,14 +23,15 @@ export async function syncTxRemove(familyId: string, ids: string[]): Promise<voi
   }
 }
 
-/** 从云端拉取家庭账本流水 */
-export function pullFromCloud(familyId: string) {
-  if (isDemoMode()) return Promise.resolve({ txs: [], ledgers: [] });
-  return fetchTx(familyId);
+/** 从云端拉取家庭账本流水（可指定拉某一本家庭账本） */
+export function pullFromCloud(familyId: string, ledgerId?: string | null, ledgersOnly?: boolean) {
+  if (isDemoMode())
+    return Promise.resolve({ txs: [], ledgers: [] as never[], ledgerId: "demo-ledger" });
+  return fetchTx(familyId, ledgerId, ledgersOnly);
 }
 
 /** 把本地流水批量上传到家庭账本 */
-export function uploadToCloud(familyId: string, txs: Tx[]) {
+export function uploadToCloud(familyId: string, ledgerId: string | null, txs: Tx[]) {
   if (isDemoMode()) return Promise.resolve({ imported: 0 });
-  return importLocalTxs(familyId, txs);
+  return importLocalTxs(familyId, ledgerId, txs);
 }

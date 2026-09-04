@@ -1,48 +1,56 @@
-# CloudBase PostgreSQL 部署说明
+# CloudBase PostgreSQL 部署说明（JS SDK 接入）
 
-月梨账单后端（ledgerApi）已适配 PostgreSQL，前端无需改动。
+月梨账单的「家庭共享」后端（`ledgerApi`）现在通过 **CloudBase JS SDK v3
+（`app.rdb()`）** 访问 `lxh-d9g0yz4st2a85197f` 环境（PG 模式）的
+PostgreSQL，**不再使用数据库账号/连接串**：
 
-## 前提
+- 云函数运行时自带腾讯云签名凭证，SDK 经 CloudBase 网关（PostgREST）读写 PG；
+- 不再需要 `PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD` 环境变量；
+- `ledgerApi` 运行时为 `Nodejs20.19`（依赖全局 fetch）。
 
-- 需要一个 **CloudBase PG 模式环境**（新建环境时选择 PostgreSQL 数据库；存量传统模式环境无法升级为 PG 模式）。
-- 该环境的云函数能直连 PostgreSQL。
+## 表结构
 
-## 云函数环境变量（必配）
-
-在控制台 云函数 -> ledgerApi -> 函数配置 -> 环境变量 中设置：
-
-```text
-PGHOST=你的数据库地址
-PGPORT=5432
-PGDATABASE=数据库名
-PGUSER=数据库账号
-PGPASSWORD=数据库密码
-```
-
-可选：
+表结构由版本化迁移维护，位于：
 
 ```text
-PGPOOL_MAX=3
-PGSSL=false   # 仅当数据库不支持 SSL 时设置
+cloudbase/migrations/20260903183000_ledger_sdk_pg_tables.sql
 ```
 
-连接信息可在控制台 PostgreSQL 数据库页面的连接信息中查看。
+包含 `users` / `families` / `family_members` / `invitations` / `ledgers` /
+`transactions` 以及自检表 `_jzprobe`，并授权给 `anon` / `authenticated` /
+`service_role`。
+
+应用到目标环境：
+
+```bash
+tcb db pg migration up -e lxh-d9g0yz4st2a85197f
+```
 
 ## 部署
 
 ```bash
-npm run typecheck
-tcb fn deploy ledgerApi --force
-npm run build:cloudbase
-tcb hosting deploy dist/client
+tcb fn deploy ledgerApi -e lxh-d9g0yz4st2a85197f --force
+tcb hosting deploy dist/client -e lxh-d9g0yz4st2a85197f
 ```
 
-部署后调用一次自检：
+## 自检
+
+部署后调用一次数据库自检（读写 + upsert + 批量删除都会验证）：
 
 ```bash
-tcb fn invoke ledgerApi -d '{"action":"dbprobe"}'
+tcb fn invoke ledgerApi -e lxh-d9g0yz4st2a85197f -d '{"action":"dbprobe"}'
+tcb fn invoke ledgerApi -e lxh-d9g0yz4st2a85197f -d '{"action":"setup"}'
 ```
 
-返回 `readBefore/setRes/readAfter` 都为 `ok` 即代表读写正常。
+`dbprobe` 返回 `readBefore / setRes / readAfter` 均为 `ok`、`setup` 返回六张表
+均为 `ok` 即代表可用。
 
-表会在首次调用时自动创建（幂等），也可用 `action=setup` 手动初始化。
+## 注意
+
+- 不要把任何数据库连接串或密钥写进代码仓库；本方案本来就不需要它们。
+- 云函数里的数据库请求经过 CloudBase 网关，因此请求体无需携带用户数据库凭据；
+  接口内的成员/创建人校验仍由 `ledgerApi` 完成（不信任前端参数）。
+- 所有表已开启 RLS（行级安全）：`20260903233000_enable_rls.sql` 为
+  service_role / authenticated / anon 放行读写，业务安全由云函数按登录 uid 校验，
+  控制台不会再提示“需配置 RLS”。
+- 网页登录（邮箱验证码等）仍需在控制台「身份认证 → 登录方式」开启；这与数据库接入无关。

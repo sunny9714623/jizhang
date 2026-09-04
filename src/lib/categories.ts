@@ -120,7 +120,8 @@ export function findLeaf(cats: CatLeaf[], id: string): CatLeaf | undefined {
 }
 
 export function leafLabel(cats: CatLeaf[], id: string): string {
-  return findLeaf(cats, id)?.name ?? "未分类";
+  // 当前账本没有这个分类时，回退查内置常用分类，避免导入/同步后显示成原始 id 或“未分类”。
+  return findLeaf(cats, id)?.name ?? findLeaf(DEFAULT_LEAVES, id)?.name ?? "未分类";
 }
 
 export function groupIdOf(cats: CatLeaf[], category: string): GroupId {

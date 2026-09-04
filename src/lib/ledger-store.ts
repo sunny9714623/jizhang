@@ -48,7 +48,14 @@ import {
   syncTxUpsert,
   uploadToCloud,
 } from "./cloudbase/sync";
-import { isDemoMode } from "./cloudbase/cloud-store";
+import { isDemoMode, useCloud } from "./cloudbase/cloud-store";
+import type { CloudLedger } from "./cloudbase/types";
+import {
+  createFamilyLedgerCloud,
+  deleteFamilyLedgerCloud,
+  renameFamilyLedgerCloud,
+  setLedgerExtrasCloud,
+} from "./cloudbase/api";
 import {
   downloadSnapshot,
   isSnapshotFile,
@@ -135,6 +142,8 @@ type LedgerState = {
   ledgerId: string;
   cloudFamilyId: string | null;
   cloudLedgerId: string | null;
+  /** 当前家庭里各成员自己的家庭账本（不合并） */
+  cloudLedgers: CloudLedger[];
   kinds: KindDef[];
   hydrate: () => Promise<void>;
   setTab: (tab: Tab) => void;
@@ -197,6 +206,8 @@ type LedgerState = {
   cloudActivate: (familyId: string | null, ledgerId: string | null) => Promise<void>;
   cloudPull: () => Promise<void>;
   cloudUploadAll: () => Promise<void>;
+  cloudRemoveLedger: (familyId: string, ledgerId: string) => Promise<void>;
+  renameCloudLedger: (familyId: string, ledgerId: string, name: string) => Promise<void>;
   createLedger: (name: string, folder: string) => Promise<void>;
   renameLedger: (id: string, name: string) => Promise<void>;
   setLedgerFolder: (id: string, folder: string) => Promise<void>;
@@ -210,14 +221,150 @@ function sortTx(list: Tx[]): Tx[] {
   return [...list].sort((a, b) => b.time - a.time);
 }
 
+/** 同一账本内按“金额+收支+商家+日期”去重（不同 id 的同一条只保留最新），修掉家庭账本点进去数据翻倍。 */
+function dedupeTxs(list: Tx[]): Tx[] {
+  const seen = new Set<string>();
+  const out: Tx[] = [];
+  for (const t of [...list].sort((a, b) => b.time - a.time)) {
+    const key = `${t.ledgerId ?? DEFAULT_LEDGER_ID}|${fingerprint(t)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return sortTx(out);
+}
+
+/**
+ * 安全合并：本地行全部保留，只有云端同 id 的行才覆盖本地（编辑同步），
+ * 绝不因为云端某次返回为空/不全而删除本地流水——那会导致家庭账本被清成 0。
+ */
+function mergeCloudTxs(local: Tx[], cloud: Tx[]): Tx[] {
+  const byId = new Map<string, Tx>();
+  for (const t of local) byId.set(t.id, t);
+  for (const c of cloud) byId.set(c.id, c);
+  return [...byId.values()];
+}
+
+/**
+ * 本地账本与家庭账本合二为一：把本地账本的 id 换成家庭账本在云端的 id，
+ * 并同步改其流水/账户/定期的 ledgerId，这样本地“家庭开销”与家庭里的
+ * “家庭开销”就是同一本账，数据一致，不会出现本地变 0 笔、数据跑到家庭里。
+ */
+async function linkLocalLedgerToCloud(
+  get: () => LedgerState,
+  set: (partial: Partial<LedgerState>) => void,
+  oldId: string,
+  cloudId: string,
+) {
+  if (!oldId || !cloudId || oldId === cloudId) return;
+  const ledgers = get().ledgers.map((l) => (l.id === oldId ? { ...l, id: cloudId } : l));
+  const txs = get().txs.map((t) =>
+    (t.ledgerId ?? DEFAULT_LEDGER_ID) === oldId ? { ...t, ledgerId: cloudId } : t,
+  );
+  const accounts = get().accounts.map((a) =>
+    a.ledgerId === oldId ? { ...a, ledgerId: cloudId } : a,
+  );
+  const recurring = get().recurring.map((r) =>
+    (r.ledgerId ?? DEFAULT_LEDGER_ID) === oldId ? { ...r, ledgerId: cloudId } : r,
+  );
+  const ledgerId = get().ledgerId === oldId ? cloudId : get().ledgerId;
+  set({ ledgers, txs, accounts, recurring, ledgerId });
+  await dbSetMeta("ledgers", ledgers);
+  await dbSetMeta("ledgerId", ledgerId);
+  await dbSetMeta("accounts", accounts);
+  await dbSetMeta("recurring", recurring);
+  await dbPutMany(txs.filter((t) => t.origin !== "sample"));
+}
+
+/** 记录“正在上传云端”的流水 id，云端拉取时据此区分“刚写入、尚未落地”与“远端已删除”。 */
+const cloudPending = new Set<string>();
+/** 已加载的家庭账本缓存：短时间内重复切换/打开同一本账时，直接用缓存，不再整本重拉。 */
+const ledgerTxCache = new Map<
+  string,
+  { txs: Tx[]; ledgers: CloudLedger[]; ledgerId: string; at: number }
+>();
+
+function queueCloudSync(familyId: string | null, tx: Tx) {
+  if (!familyId) return;
+  // 用“本地账本名”找到它在家庭里对应的那本（我是主人的），把流水写到正确账本。
+  // 避免因本地账本 id 不是家庭账本 id，而把流水误写进后备的“家庭账本”。
+  const me = useCloud.getState().user?.uid;
+  const s = useLedger.getState();
+  const localBookId = tx.ledgerId ?? DEFAULT_LEDGER_ID;
+  const localBook = s.ledgers.find((l) => l.id === localBookId);
+  let ledgerId = tx.ledgerId;
+  if (me && localBook) {
+    const cloud = s.cloudLedgers.find((l) => l.name === localBook.name && l.ownerUid === me);
+    if (cloud) ledgerId = cloud._id;
+  }
+  const final = ledgerId && ledgerId !== tx.ledgerId ? { ...tx, ledgerId } : tx;
+  cloudPending.add(final.id);
+  void syncTxUpsert(familyId, final);
+}
+
+/** 分类/图标/定期账单变更后，自动同步到「当前打开的、自己名下」的家庭账本。 */
+function syncActiveLedgerCats(get: () => LedgerState) {
+  const me = useCloud.getState().user?.uid;
+  const familyId = get().cloudFamilyId;
+  const ledgerId = get().cloudLedgerId;
+  if (!familyId || !ledgerId || !me) return;
+  const ledger = get().cloudLedgers.find((l) => l._id === ledgerId);
+  if (!ledger || ledger.ownerUid !== me) return;
+  const bookRecurring = get().recurring.filter(
+    (r) => (r.ledgerId ?? DEFAULT_LEDGER_ID) === get().ledgerId,
+  );
+  void setLedgerExtrasCloud(familyId, ledgerId, get().cats, get().kinds, bookRecurring);
+}
+
+/**
+ * 把本地账本按原名带入家庭：缺哪本建哪本，并把本地流水幂等上传（按 id 去重，不重复、不改名）。
+ * 每本本地账只在「家庭里还没有同名账本」时上传一次，避免每次进入家庭都整本重传。
+ */
+async function ensureFamilyBooks(
+  get: () => LedgerState,
+  set: (partial: Partial<LedgerState>) => void,
+  familyId: string,
+  cloudLedgers: CloudLedger[],
+): Promise<CloudLedger[]> {
+  const me = useCloud.getState().user?.uid;
+  const files = get().ledgers;
+  const allTxs = get().txs;
+  let ledgers = cloudLedgers;
+
+  for (const file of files) {
+    const id = file.id || DEFAULT_LEDGER_ID;
+    const local = allTxs.filter(
+      (t) =>
+        (t.ledgerId ?? DEFAULT_LEDGER_ID) === id &&
+        t.origin !== "sample" &&
+        !isAccountTx(t),
+    );
+    if (local.length === 0) continue;
+
+    // 保持本地原名，绝不在家庭里改名/加后缀
+    const targetName = (file.name || "我的账本").trim();
+    let target = ledgers.find((l) => l.name === targetName && l.ownerUid === me);
+    if (!target) {
+      const res = await createFamilyLedgerCloud(familyId, targetName);
+      target = res.ledger;
+      ledgers = [...ledgers, target];
+      await uploadToCloud(familyId, target._id, local);
+    }
+    // 本地账本与家庭账本合二为一（同一 id、同一数据），本地不再变 0 笔。
+    await linkLocalLedgerToCloud(get, set, id, target._id);
+    // 随账本保存分类定义（自定义分类跨设备同步）
+    if (get().cats.length) {
+      void setLedgerExtrasCloud(familyId, target._id, get().cats, get().kinds, get().recurring);
+    }
+  }
+
+  set({ cloudLedgers: ledgers });
+  return ledgers;
+}
+
 function uniqueLedgerName(ledgers: LedgerFile[], base: string): string {
-  const name = base.trim() || "恢复的账本";
-  if (!ledgers.some((l) => l.name === name)) return name;
-  const suffixed = `${name} 恢复`;
-  if (!ledgers.some((l) => l.name === suffixed)) return suffixed;
-  let i = 2;
-  while (ledgers.some((l) => l.name === `${suffixed} ${i}`)) i += 1;
-  return `${suffixed} ${i}`;
+  // 恢复时保持备份里的原始账本名，不自动加“恢复”等后缀。
+  return base.trim() || "恢复的账本";
 }
 
 export function monthStats(txs: Tx[], month: string, cats: CatLeaf[] = DEFAULT_LEAVES) {
@@ -251,14 +398,42 @@ export function monthStats(txs: Tx[], month: string, cats: CatLeaf[] = DEFAULT_L
   return { expense, income, balance: income - expense, byCat, byGroup, byDay, countByGroup, countByCat };
 }
 
-function fingerprint(row: Pick<Tx, "source" | "amountFen" | "merchant" | "time">): string {
-  return `${row.source}|${row.amountFen}|${row.merchant}|${new Date(row.time).toDateString()}`;
+/** 归一化商家名：去平台前缀（微信支付/支付宝/转账等）与标点空格，用于去重判断。 */
+function normalizeMerchant(s: string): string {
+  return (s || "")
+    .toLowerCase()
+    .replace(
+      /^(微信支付|支付宝|财付通|微信|支付宝|转账|退款|商户|付款|收款|消费|提现)[-—:：\s]*/g,
+      "",
+    )
+    .replace(/[，,、。.\s\u00a0]+/g, "");
+}
+
+function fingerprint(
+  row: Pick<Tx, "direction" | "amountFen" | "merchant" | "time">,
+): string {
+  // 去重只按“真实内容”：金额 + 收支 + 归一化商家 + 日期。
+  // 不把 source（手动/导入/定期入账/AI 识别）和 status 算进去，
+  // 否则同一笔定期/重复账单会用不同来源重复入册。
+  const merchant = normalizeMerchant(row.merchant);
+  return `${row.amountFen}|${row.direction}|${merchant}|${new Date(row.time).toDateString()}`;
 }
 
 function sameRecord(tx: Tx, list: Tx[]): boolean {
   if (tx.orderId && list.some((t) => t.orderId && t.orderId === tx.orderId)) return true;
   const fp = fingerprint(tx);
   return list.some((t) => fingerprint(t) === fp);
+}
+
+/** 定期账单去重：同一本账里，标题 + 金额 + 周期 + 下次到期日完全一致即为同一条。 */
+function sameRecurring(a: Recurring, b: Recurring): boolean {
+  return (
+    (a.ledgerId ?? DEFAULT_LEDGER_ID) === (b.ledgerId ?? DEFAULT_LEDGER_ID) &&
+    normalizeMerchant(a.title) === normalizeMerchant(b.title) &&
+    a.amountFen === b.amountFen &&
+    a.cadence === b.cadence &&
+    a.nextDue === b.nextDue
+  );
 }
 
 function accountTxId(accountId: string): string {
@@ -287,7 +462,7 @@ async function addTx(
   });
   await dbPutMany(cleaned.filter((t) => t.origin !== "sample"));
   const familyId = get().cloudFamilyId;
-  if (familyId) void syncTxUpsert(familyId, tagged);
+  queueCloudSync(familyId, tagged);
 }
 
 async function writeLedgerTx(
@@ -309,7 +484,7 @@ async function writeLedgerTx(
   });
   await dbPutMany(cleaned.filter((t) => t.origin !== "sample"));
   const familyId = get().cloudFamilyId;
-  if (familyId) void syncTxUpsert(familyId, tx);
+  queueCloudSync(familyId, tx);
 }
 
 function txFromAccountDelta(account: Account, deltaNet: number, kinds: KindDef[]): Tx {
@@ -418,7 +593,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
   notifications: true,
   ingesting: false,
   wallpaper: null,
-  recurring: SAMPLE_RECURRING,
+  recurring: [],
   accounts: SAMPLE_ACCOUNTS,
   remindRecord: true,
   cats: DEFAULT_LEAVES,
@@ -428,6 +603,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
   ledgerId: DEFAULT_LEDGER_ID,
   cloudFamilyId: null,
   cloudLedgerId: null,
+  cloudLedgers: [],
   kinds: DEFAULT_KINDS,
 
   hydrate: async () => {
@@ -436,6 +612,15 @@ export const useLedger = create<LedgerState>((set, get) => ({
     try {
       await requestPersist();
       const rows = await dbListTx();
+      // 默认/示例数据（origin=sample）一律清掉，避免它们被统计进真实账本；保留真实流水。
+      const sampleRows = rows.filter((t) => t.origin === "sample");
+      if (sampleRows.length) {
+        await dbDeleteMany(sampleRows.map((t) => t.id));
+        const real = rows.filter((t) => t.origin !== "sample");
+        rows.length = 0;
+        rows.push(...real);
+        await dbSetMeta("usingSample", false);
+      }
       const dark = (await dbGetMeta<boolean>("dark")) ?? false;
       const notifications = (await dbGetMeta<boolean>("notifications")) ?? true;
       const snap = rows.length === 0 ? readSnapshot() : null;
@@ -451,7 +636,10 @@ export const useLedger = create<LedgerState>((set, get) => ({
       const wallpaper =
         savedWall && savedWall !== "/samples/moon-pear.jpg" ? savedWall : null;
       if (savedWall === "/samples/moon-pear.jpg") void dbSetMeta("wallpaper", "");
-      const rec = (await dbGetMeta<Recurring[]>("recurring")) ?? SAMPLE_RECURRING;
+      // 不再自动带示例定期账单（花呗还款/iCloud+ 等）；用户自己的定期才显示。
+      const rec = ((await dbGetMeta<Recurring[]>("recurring")) ?? []).filter(
+        (r) => !r.id.startsWith("r-"),
+      );
       const acc = (await dbGetMeta<Account[]>("accounts")) ?? SAMPLE_ACCOUNTS;
       const savedKinds = await dbGetMeta<KindDef[]>("kinds");
       const kinds = savedKinds && savedKinds.length > 0 ? savedKinds : DEFAULT_KINDS;
@@ -493,10 +681,18 @@ export const useLedger = create<LedgerState>((set, get) => ({
       if (changed.length) void dbPutMany(changed);
       void dbSetMeta("cats", cats);
       void dbSetMeta("catBag", catBag);
+      // 本机初始化和云端拉取可能交错完成：用并集而不是覆盖，
+      // 避免 hydrate 晚到时把刚拉回的云端账单清成 0。
+      const kept = new Set(get().txs.map((t) => t.id));
+      const mergedRows = sortTx([
+        ...get().txs,
+        ...remapped.filter((t) => !kept.has(t.id)),
+      ]);
+      const cloudOn = Boolean(get().cloudFamilyId);
       if (rows.length > 0) {
         markUsed();
         set({
-          txs: sortTx(remapped),
+          txs: mergedRows,
           usingSample: usingSample && rows.every((r) => r.origin === "sample"),
           liveCapture,
           dark,
@@ -505,18 +701,18 @@ export const useLedger = create<LedgerState>((set, get) => ({
           recurring: rec,
           accounts: acc,
           remindRecord,
-          cats: catBag[book],
+          cats: unionLeaves([DEFAULT_LEAVES, catBag[book] ?? []]),
           catBag,
           book,
           ledgers,
-          ledgerId,
+          ledgerId: cloudOn ? get().cloudLedgerId ?? ledgerId : ledgerId,
           kinds,
         });
         const snap = snapshotFrom({ ...get(), usingSample: false });
         if (snap) writeSnapshot(snap);
       } else if (wasUsed()) {
         set({
-          txs: [],
+          txs: mergedRows,
           usingSample: false,
           liveCapture,
           dark,
@@ -529,21 +725,22 @@ export const useLedger = create<LedgerState>((set, get) => ({
           catBag,
           book,
           ledgers,
-          ledgerId,
+          ledgerId: cloudOn ? get().cloudLedgerId ?? ledgerId : ledgerId,
           kinds,
         });
       } else {
-        void dbPutMany(SAMPLE_TX);
-        void dbSetMeta("usingSample", true);
-        void dbSetMeta("recurring", SAMPLE_RECURRING);
-        void dbSetMeta("accounts", SAMPLE_ACCOUNTS);
+        // 全新安装不再自动塞示例数据，避免默认账本/示例流水/示例定期被统计进来。
+        void dbSetMeta("usingSample", false);
+        void dbSetMeta("recurring", []);
+        void dbSetMeta("accounts", []);
         set({
+          ...(cloudOn ? { txs: mergedRows } : {}),
           liveCapture,
           dark,
           notifications,
           wallpaper,
-          recurring: SAMPLE_RECURRING,
-          accounts: SAMPLE_ACCOUNTS,
+          recurring: [],
+          accounts: [],
           remindRecord,
           catBag,
           book: "main",
@@ -685,6 +882,11 @@ export const useLedger = create<LedgerState>((set, get) => ({
     });
     await dbPutMany(incoming);
     await dbSetMeta("usingSample", false);
+    // AI 批量入账也要自动同步到家庭，无需再手动“上传本地流水”。
+    const familyId = get().cloudFamilyId;
+    if (familyId) {
+      for (const tx of incoming) queueCloudSync(familyId, tx);
+    }
     toast.success(`已记 ${incoming.length} 笔`);
     return incoming.length;
   },
@@ -698,6 +900,8 @@ export const useLedger = create<LedgerState>((set, get) => ({
       selectedId: id,
     });
     await dbPutTx(next);
+    const familyId = get().cloudFamilyId;
+    queueCloudSync(familyId, next);
   },
 
   updateTx: async (id, patch) => {
@@ -745,6 +949,8 @@ export const useLedger = create<LedgerState>((set, get) => ({
       selectedId: id,
     });
     await dbPutTx(next);
+    const familyId = get().cloudFamilyId;
+    queueCloudSync(familyId, next);
     toast.success("已保存");
   },
 
@@ -809,6 +1015,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
     const nextAccounts = [...current.accounts];
     const nextRecurring = [...current.recurring];
     const appliedLedgers = new Set<string>();
+    const restoredRows: Tx[] = [];
     let firstTargetId: string | null = null;
     let txCount = 0;
     let accountCount = 0;
@@ -848,6 +1055,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
         if (sameRecord(row, targetTxs)) continue;
         targetTxs.push(row);
         nextTxs.push(row);
+        restoredRows.push(row);
         txCount += 1;
       }
       for (const acc of group.accounts) {
@@ -855,6 +1063,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
         accountCount += 1;
       }
       for (const rec of group.recurring) {
+        if (nextRecurring.some((r) => sameRecurring(r, rec))) continue;
         nextRecurring.push({ ...rec, id: newId(), ledgerId });
         recurringCount += 1;
       }
@@ -866,6 +1075,13 @@ export const useLedger = create<LedgerState>((set, get) => ({
     }
 
     const nextCats = plan.cats?.length ? unionLeaves([current.cats, plan.cats]) : current.cats;
+    const nextCatBag = plan.catBag
+      ? {
+          main: unionLeaves([DEFAULT_LEAVES, plan.catBag.main ?? []]),
+          bills: unionLeaves([DEFAULT_LEAVES, plan.catBag.bills ?? []]),
+          ...plan.catBag,
+        }
+      : { main: nextCats, bills: nextCats };
     const targetId = firstTargetId ?? current.ledgerId;
     set({
       txs: sortTx(nextTxs),
@@ -873,7 +1089,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
       accounts: nextAccounts,
       recurring: nextRecurring,
       cats: nextCats,
-      catBag: { main: nextCats, bills: nextCats },
+      catBag: nextCatBag,
       usingSample: false,
       ledgerId: targetId,
       wallpaper: plan.wallpaper !== undefined ? plan.wallpaper : current.wallpaper,
@@ -902,6 +1118,12 @@ export const useLedger = create<LedgerState>((set, get) => ({
       recurringCount ? `${recurringCount} 条定期` : "",
     ].filter(Boolean);
     toast.success(`已恢复 ${parts.join("、")}，共 ${appliedLedgers.size} 本账`);
+
+    // 恢复的流水标记为待上传，避免“云端拉取”误把它当成远端删除而清掉。
+    const familyId = get().cloudFamilyId;
+    if (familyId) {
+      for (const row of restoredRows) queueCloudSync(familyId, row);
+    }
   },
 
   importFiles: async (files) => {
@@ -983,6 +1205,11 @@ export const useLedger = create<LedgerState>((set, get) => ({
     await dbPutMany(wasSample ? [...keepOld, ...incoming] : incoming);
     await dbSetMeta("usingSample", false);
     await dbSetMeta("book", "main");
+    // 导入的流水也要自动同步到家庭，避免“从云端拉取”把它当成已删除而误清、下次又重复导入。
+    const familyId = get().cloudFamilyId;
+    if (familyId) {
+      for (const tx of incoming) queueCloudSync(familyId, tx);
+    }
     const extra = dupes ? `，跳过 ${dupes} 条重复` : "";
     toast.success(`已入册 ${incoming.length} 笔${extra}`);
   },
@@ -1117,12 +1344,14 @@ export const useLedger = create<LedgerState>((set, get) => ({
       : [tagged, ...get().recurring];
     set({ recurring: next });
     await dbSetMeta("recurring", next);
+    syncActiveLedgerCats(get);
   },
 
   removeRecurring: async (id) => {
     const next = get().recurring.filter((r) => r.id !== id);
     set({ recurring: next });
     await dbSetMeta("recurring", next);
+    syncActiveLedgerCats(get);
   },
 
   payRecurring: async (id) => {
@@ -1213,6 +1442,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
     set({ cats: next, catBag });
     await dbSetMeta("cats", next);
     await dbSetMeta("catBag", catBag);
+    syncActiveLedgerCats(get);
   },
 
   removeCat: async (id) => {
@@ -1225,10 +1455,11 @@ export const useLedger = create<LedgerState>((set, get) => ({
     set({ cats: next, catBag });
     await dbSetMeta("cats", next);
     await dbSetMeta("catBag", catBag);
+    syncActiveLedgerCats(get);
   },
 
   setBook: (book) => {
-    const cats = get().catBag[book] ?? DEFAULT_LEAVES;
+    const cats = unionLeaves([DEFAULT_LEAVES, get().catBag[book] ?? []]);
     set({ book, cats, catFilter: null, groupFilter: null, selectedId: null, tab: "home" });
     void dbSetMeta("book", book);
   },
@@ -1241,7 +1472,13 @@ export const useLedger = create<LedgerState>((set, get) => ({
 
   cloudActivate: async (familyId, ledgerId) => {
     if (!familyId) {
-      set({ cloudFamilyId: null, cloudLedgerId: null });
+      const local = get().ledgers[0];
+      set({
+        cloudFamilyId: null,
+        cloudLedgerId: null,
+        cloudLedgers: [],
+        ...(local ? { ledgerId: local.id } : {}),
+      });
       return;
     }
     if (isDemoMode()) {
@@ -1249,31 +1486,110 @@ export const useLedger = create<LedgerState>((set, get) => ({
       return;
     }
     try {
-      const res = await pullFromCloud(familyId);
-      const cloudLedgerId = ledgerId ?? res.ledgers[0]?._id ?? null;
+      const me = useCloud.getState().user?.uid;
+      const localBook =
+        get().ledgers.find((l) => l.id === get().ledgerId) ?? get().ledgers[0];
+      const wantName = (localBook?.name || "我的账本").trim();
+      let ledgers: CloudLedger[] = [];
+
+      // 未指定某本家庭账本（进入家庭/切换家庭）时：
+      // 只读取家庭已有的账本列表；不再自动把本地账本批量带入（避免把数据推到错误的家庭）。
+      let targetId: string | null = ledgerId ?? null;
+      if (!targetId) {
+        const list = await pullFromCloud(familyId, null, true);
+        ledgers = list.ledgers ?? [];
+        targetId =
+          ledgers.find((l) => l.name === wantName && (l.ownerUid === me || !l.ownerUid))
+            ?._id ??
+          ledgers.find((l) => l.name === wantName)?._id ??
+          list.ledgerId ??
+          ledgers.find((l) => l.ownerUid === me)?._id ??
+          ledgers[0]?._id ??
+          null;
+      }
+
+      if (!targetId) {
+        set({ cloudFamilyId: familyId, cloudLedgerId: null, cloudLedgers: ledgers });
+        toast.message("家庭里还没有账本，可用「上传本地流水」把本地账本带进来");
+        return;
+      }
+
+      // 已缓存且 20 秒内打开过同一本账 → 直接用本地缓存，切回/重复打开秒开。
+      // 缓存保存在会话期间；切到已打开过的账本秒开，随后台静默刷新与云端对齐。
+      const cached = ledgerTxCache.get(targetId);
+      if (cached) {
+        set({
+          cloudFamilyId: familyId,
+          cloudLedgerId: cached.ledgerId,
+          cloudLedgers: cached.ledgers,
+          txs: dedupeTxs(mergeCloudTxs(get().txs, cached.txs)),
+          ledgerId: cached.ledgerId,
+          month: monthKey(Date.now()),
+          catFilter: null,
+          groupFilter: null,
+          selectedId: null,
+          tab: ledgerId ? "home" : get().tab,
+        });
+        // 先用缓存秒开，随后台静默刷新，保证与云端数据同步。
+        void get().cloudPull();
+        return;
+      }
+
+      // 拉取目标账本的流水（同时返回家庭全部账本列表，用于展示）
+      const res = await pullFromCloud(familyId, targetId);
+      const cloudLedgers = res.ledgers ?? ledgers;
+      const cloudLedgerId = res.ledgerId ?? targetId;
       if (!cloudLedgerId) {
-        set({ cloudFamilyId: familyId, cloudLedgerId: null });
+        set({ cloudFamilyId: familyId, cloudLedgerId: null, cloudLedgers: cloudLedgers });
         toast.error("家庭账本还没初始化，请稍后再试");
         return;
       }
-      const cloudIds = new Set(res.txs.map((t) => t.id));
-      const merged = sortTx([
-        ...get().txs.filter((t) => !cloudIds.has(t.id)),
-        ...res.txs,
-      ]);
+      const merged = dedupeTxs(mergeCloudTxs(get().txs, res.txs ?? []));
+      // 应用该家庭账本随数据保存的分类定义（自定义分类跨设备恢复）
+      const activeLedger = cloudLedgers.find((l) => l._id === cloudLedgerId) as
+        | { cats?: unknown[]; kinds?: unknown[]; recurring?: unknown[] }
+        | undefined;
+      if (activeLedger && (Array.isArray(activeLedger.cats) || Array.isArray(activeLedger.recurring))) {
+        const cats = activeLedger.cats as CatLeaf[];
+        const kinds = activeLedger.kinds as KindDef[] | undefined;
+        const patch: Partial<LedgerState> = {
+          // 仅在当前会话内用家庭账本的分类；不覆盖 catBag，避免影响本地账本的分类。
+          ...(Array.isArray(kinds) && kinds.length ? { kinds } : {}),
+        };
+        if (Array.isArray(cats) && cats.length) {
+          patch.cats = unionLeaves([DEFAULT_LEAVES, cats]);
+        }
+        if (Array.isArray(activeLedger.recurring) && activeLedger.recurring.length) {
+          const byId = new Map(get().recurring.map((r) => [r.id, r]));
+          for (const r of activeLedger.recurring as Recurring[]) {
+            if (!byId.has(r.id)) byId.set(r.id, { ...r, ledgerId: cloudLedgerId });
+          }
+          patch.recurring = [...byId.values()];
+        }
+        set(patch);
+      }
       set({
         cloudFamilyId: familyId,
         cloudLedgerId,
+        cloudLedgers,
         txs: merged,
         ledgerId: cloudLedgerId,
         month: monthKey(Date.now()),
         catFilter: null,
         groupFilter: null,
         selectedId: null,
-        tab: "home",
+        // 只有“点了某一本账本”才切到概览；单纯切换家庭停留在当前页面
+        tab: ledgerId ? "home" : get().tab,
       });
-      await dbPutMany(merged.filter((t) => t.origin !== "sample"));
-      toast.success("已切换到家庭账本");
+      await dbPutMany((res.txs ?? []).filter((t) => t.origin !== "sample"));
+      ledgerTxCache.set(targetId, {
+        txs: res.txs ?? [],
+        ledgers: cloudLedgers,
+        ledgerId: cloudLedgerId,
+        at: Date.now(),
+      });
+      // 打开自己名下的家庭账本时，把本地分类（含已建的自定义分类/图标）同步上去。
+      syncActiveLedgerCats(get);
     } catch (err) {
       set({ cloudFamilyId: familyId });
       console.error("[cloud] activate failed", err);
@@ -1289,15 +1605,31 @@ export const useLedger = create<LedgerState>((set, get) => ({
       return;
     }
     try {
-      const res = await pullFromCloud(familyId);
-      const cloudIds = new Set(res.txs.map((t) => t.id));
-      const merged = sortTx([
-        ...get().txs.filter((t) => !cloudIds.has(t.id)),
-        ...res.txs,
-      ]);
-      set({ txs: merged });
-      await dbPutMany(merged.filter((t) => t.origin !== "sample"));
-      toast.success("已从云端同步");
+      const res = await pullFromCloud(familyId, get().cloudLedgerId);
+      const ledgers = res.ledgers ?? get().cloudLedgers;
+      // 安全合并：本地流水不被删除，只让云端同 id 的记录覆盖本地。
+      // 避免“云端某次返回为空/不全”把家庭账本清成 0。
+      const merged = dedupeTxs(mergeCloudTxs(get().txs, res.txs ?? []));
+      const activeLedger = (ledgers ?? []).find(
+        (l) => l._id === get().cloudLedgerId,
+      ) as { cats?: unknown[]; kinds?: unknown[] } | undefined;
+      const patch: Partial<LedgerState> = { txs: merged, cloudLedgers: ledgers };
+      if (Array.isArray(activeLedger?.cats) && (activeLedger.cats as unknown[]).length) {
+        patch.cats = unionLeaves([DEFAULT_LEAVES, activeLedger.cats as CatLeaf[]]);
+        const kinds = activeLedger.kinds as KindDef[] | undefined;
+        if (Array.isArray(kinds) && kinds.length) patch.kinds = kinds;
+      }
+      set(patch);
+      await dbPutMany((res.txs ?? []).filter((t) => t.origin !== "sample"));
+      const activeId = get().cloudLedgerId;
+      if (activeId) {
+        ledgerTxCache.set(activeId, {
+          txs: res.txs ?? [],
+          ledgers,
+          ledgerId: res.ledgerId ?? activeId,
+          at: Date.now(),
+        });
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "同步失败");
     }
@@ -1310,16 +1642,105 @@ export const useLedger = create<LedgerState>((set, get) => ({
       toast.message("体验模式：数据仅存本机");
       return;
     }
-    const local = get().txs.filter((t) => t.origin !== "sample" && !isAccountTx(t));
-    if (local.length === 0) {
-      toast.message("本地没有可上传的流水");
+    try {
+      // 本地每一本账 → 家庭里独立的一本账（按原名，不合并）；
+      // 上传后仍保留家庭全部账本（含其他成员），避免只保留自己的账本。
+      const me = useCloud.getState().user?.uid;
+      const files = get().ledgers;
+      const allTxs = get().txs;
+      const list = await pullFromCloud(familyId, get().cloudLedgerId ?? null);
+      let ledgers = list.ledgers ?? get().cloudLedgers;
+      let owned = ledgers.filter((l) => l.ownerUid === me);
+      let uploaded = 0;
+      let createdCount = 0;
+      for (const file of files) {
+        const id = file.id || DEFAULT_LEDGER_ID;
+        // 默认“月梨账单”是初始/占位账本，不当作共享账本上传，避免多出一本空/示例账。
+        if (id === DEFAULT_LEDGER_ID) continue;
+        const local = allTxs.filter(
+          (t) =>
+            (t.ledgerId ?? DEFAULT_LEDGER_ID) === id &&
+            t.origin !== "sample" &&
+            !isAccountTx(t),
+        );
+        // 没有流水就不新建家庭账本（避免为分类凭空造账本）；分类只同步到已有同名账本。
+        if (local.length === 0) continue;
+        // 保持本地原名，不在家庭里改名/加后缀
+        const targetName = (file.name || "我的账本").trim();
+        let target = owned.find((l) => l.name === targetName);
+        if (!target) {
+          const created = await createFamilyLedgerCloud(familyId, targetName);
+          target = created.ledger;
+          owned = [...owned, target];
+          ledgers = [...ledgers, target];
+          createdCount += 1;
+        }
+        const res = await uploadToCloud(familyId, target._id, local);
+        uploaded += res.imported;
+        // 本地账本与家庭账本合二为一，本地不再变 0 笔。
+        await linkLocalLedgerToCloud(get, set, id, target._id);
+        if (get().cats.length) {
+          void setLedgerExtrasCloud(familyId, target._id, get().cats, get().kinds, get().recurring);
+        }
+      }
+      set({ cloudLedgers: ledgers });
+      if (uploaded === 0 && createdCount === 0) {
+        toast.message("本地没有可上传的流水");
+      } else {
+        toast.success(
+          createdCount > 0
+            ? `已上传 ${uploaded} 笔，${createdCount} 本账本已按原名进入家庭`
+            : `已上传 ${uploaded} 笔流水（按账本分本保存）`,
+        );
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "上传失败");
+    }
+  },
+
+  cloudRemoveLedger: async (familyId, ledgerId) => {
+    if (isDemoMode()) {
+      toast.message("体验模式不支持删除云端账本");
       return;
     }
     try {
-      const res = await uploadToCloud(familyId, local);
-      toast.success(`已上传 ${res.imported} 笔流水`);
+      await deleteFamilyLedgerCloud(familyId, ledgerId);
+      const target = get().cloudLedgers.find((l) => l._id === ledgerId);
+      const isMine = target?.ownerUid === useCloud.getState().user?.uid;
+      let cloudLedgers = get().cloudLedgers.filter((l) => l._id !== ledgerId);
+      if (isMine) {
+        // 删除“我自己”的家庭账本 = 一并清掉本地同名账本（二者本来是一本），
+        // 避免它在账本管理/恢复“现有账本”里还残留着。
+        const dropped = get().txs.filter((t) => (t.ledgerId ?? DEFAULT_LEDGER_ID) === ledgerId);
+        const nextLedgers = get().ledgers.filter((l) => l.id !== ledgerId);
+        const nextTxs = get().txs.filter((t) => (t.ledgerId ?? DEFAULT_LEDGER_ID) !== ledgerId);
+        set({ cloudLedgers, ledgers: nextLedgers, txs: nextTxs });
+        await dbSetMeta("ledgers", nextLedgers);
+        if (dropped.length) await dbDeleteMany(dropped.map((t) => t.id));
+      } else {
+        set({ cloudLedgers });
+      }
+      toast.success("已删除该家庭账本");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "上传失败");
+      toast.error(err instanceof Error ? err.message : "删除失败");
+    }
+  },
+
+  renameCloudLedger: async (familyId, ledgerId, name) => {
+    const nextName = name.trim().slice(0, 30);
+    if (!nextName) {
+      toast.message("账本名称不能为空");
+      return;
+    }
+    try {
+      const res = await renameFamilyLedgerCloud(familyId, ledgerId, nextName);
+      const cloudLedgers = get().cloudLedgers.map((l) =>
+        l._id === ledgerId ? res.ledger : l,
+      );
+      set({ cloudLedgers });
+      toast.success("账本已改名");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "改名失败");
     }
   },
 
@@ -1436,7 +1857,8 @@ export function visibleTxs(
 ): Tx[] {
   const q = search.trim().toLowerCase();
   return txs.filter((tx) => {
-    if (monthKey(tx.time) !== month) return false;
+    // 有搜索词时跨整本账本（所有月份）搜索，避免“搜不到历史记录”
+    if (q ? false : monthKey(tx.time) !== month) return false;
     if (groupFilter) {
       if (groupIdOf(cats, tx.category) !== groupFilter) return false;
       if (isAccountTx(tx)) return false;

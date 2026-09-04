@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 import { LEDGER_FOLDERS, txsInLedger, type LedgerFile } from "@/lib/ledgers";
 import { useLedger } from "@/lib/ledger-store";
+import { useCloud } from "@/lib/cloudbase/cloud-store";
 import { Button } from "@/components/ui/button";
 import { Pager, pageSlice } from "@/components/pager";
 import { cn } from "@/lib/utils";
@@ -19,6 +21,14 @@ export function BooksView() {
   const removeLedger = useLedger((s) => s.removeLedger);
   const mergeLedgers = useLedger((s) => s.mergeLedgers);
   const setTab = useLedger((s) => s.setTab);
+  const cloudFamilyId = useLedger((s) => s.cloudFamilyId);
+  const cloudLedgers = useLedger((s) => s.cloudLedgers);
+  const cloudLedgerId = useLedger((s) => s.cloudLedgerId);
+  const cloudActivate = useLedger((s) => s.cloudActivate);
+  const cloudRemoveLedger = useLedger((s) => s.cloudRemoveLedger);
+  const renameCloudLedger = useLedger((s) => s.renameCloudLedger);
+  const familyMembers = useCloud((s) => s.members);
+  const cloudUser = useCloud((s) => s.user);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("生活");
@@ -27,7 +37,11 @@ export function BooksView() {
   const [merging, setMerging] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [into, setInto] = useState(ledgerId);
-  const paged = pageSlice(ledgers, page, size);
+  const cloudSynced = new Set(cloudLedgers.map((l) => l._id));
+  const visibleLedgers = cloudFamilyId
+    ? ledgers.filter((l) => !cloudSynced.has(l.id))
+    : ledgers;
+  const paged = pageSlice(visibleLedgers, page, size);
 
   const toggle = (id: string) => {
     setPicked((prev) => {
@@ -42,7 +56,6 @@ export function BooksView() {
     <div className="flex flex-col gap-4 pb-8">
       <div className="flex items-baseline justify-between px-1">
         <div>
-          <h2 className="font-display text-xl text-fg">账本管理</h2>
           <p className="mt-0.5 text-xs text-muted">左滑删除。合并会把流水、账户和定期账单并到一本。</p>
         </div>
         <button type="button" className="text-sm text-muted" onClick={() => setTab("home")}>
@@ -50,7 +63,96 @@ export function BooksView() {
         </button>
       </div>
 
-      <div className="flex gap-2">
+      {cloudFamilyId && cloudLedgers.length > 0 ? (
+        <section className="rounded-xl bg-elevated px-4 py-3 shadow-[var(--shadow-border)]">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="font-display text-lg text-fg">家庭账本</p>
+            <span className="text-[11px] text-subtle">成员各自的账本原名展示，全员可查看/记账</span>
+          </div>
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {cloudLedgers.map((l) => {
+              const active = l._id === cloudLedgerId;
+              const count = txsInLedger(txs, l._id).length;
+              const owner = familyMembers.find((m) => m.uid === l.ownerUid);
+              const isMe = l.ownerUid === cloudUser?.uid;
+              const avatar = owner?.avatar || (isMe ? cloudUser?.avatar || "" : "");
+              const ownerName = owner?.name || (isMe ? cloudUser?.name || "" : "") || l.name;
+              return (
+                <li key={l._id} className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void cloudActivate(cloudFamilyId, l._id)}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left",
+                      active ? "bg-primary text-primary-fg" : "bg-surface shadow-[var(--shadow-border)]",
+                    )}
+                  >
+                    {avatar ? (
+                      <img
+                        src={avatar}
+                        alt=""
+                        className="size-8 shrink-0 rounded-full object-cover"
+                      />
+                    ) : (
+                      <span className="grid size-8 shrink-0 place-items-center rounded-full bg-elevated text-sm text-muted">
+                        {(ownerName || "账").slice(0, 1)}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm">{l.name}</span>
+                      <span
+                        className={cn(
+                          "block text-[11px]",
+                          active ? "text-primary-fg/80" : "text-subtle",
+                        )}
+                      >
+                        {active ? "当前账本" : "点按切换"} · {count} 笔
+                      </span>
+                    </span>
+                  </button>
+                  {l.ownerUid === cloudUser?.uid ? (
+                    <div className="flex shrink-0 flex-col gap-1">
+                      <button
+                        type="button"
+                        aria-label={`重命名家庭账本 ${l.name}`}
+                        className="grid size-8 place-items-center rounded-md text-subtle hover:bg-elevated hover:text-fg"
+                        onClick={() => {
+                          const next = window.prompt("给这本家庭账本改个名字", l.name);
+                          if (next && next.trim() && next.trim() !== l.name) {
+                            void renameCloudLedger(cloudFamilyId, l._id, next.trim());
+                          }
+                        }}
+                      >
+                        <Pencil className="size-4" />
+                      </button>
+                      {!active ? (
+                        <button
+                          type="button"
+                          aria-label={`删除家庭账本 ${l.name}`}
+                          className="grid size-8 place-items-center rounded-md text-subtle hover:bg-elevated hover:text-danger"
+                          onClick={() => {
+                            if (
+                              window.confirm(`删除家庭账本「${l.name}」及其全部流水？该操作会影响所有家庭成员。`)
+                            ) {
+                              void cloudRemoveLedger(cloudFamilyId, l._id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
+      {!cloudFamilyId ? (
+        <>
+          <div className="flex gap-2">
         <button
           type="button"
           className={cn(
@@ -138,7 +240,7 @@ export function BooksView() {
         ))}
       </div>
       <Pager
-        total={ledgers.length}
+        total={visibleLedgers.length}
         page={page}
         size={size}
         onPage={setPage}
@@ -182,6 +284,8 @@ export function BooksView() {
             确认合并
           </Button>
         </div>
+      ) : null}
+        </>
       ) : null}
     </div>
   );

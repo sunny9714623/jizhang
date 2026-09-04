@@ -35,7 +35,13 @@ export async function getCurrentUser() {
       auth.getCurrentUser(),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
     ]);
-    return user ?? null;
+    if (user) return user;
+    // 账号密码登录等场景，getCurrentUser 可能拿不到，用 getLoginState 兜底。
+    const state = await Promise.race([
+      auth.getLoginState(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+    ]).catch(() => null);
+    return state?.user ?? null;
   } catch (err) {
     console.warn("[cloud] getCurrentUser failed", err);
     return null;
@@ -72,14 +78,6 @@ export function isAuthStateError(err: unknown): boolean {
  * 用户信息与 access/refresh token（可能已经失效，无法通过 SDK 正常登出）。
  */
 export async function clearCloudAuth(): Promise<void> {
-  const auth = getAuth();
-  if (auth) {
-    try {
-      await auth.signOut();
-    } catch {
-      // 忽略：服务端登出失败也要继续清本地
-    }
-  }
   try {
     const doomed: string[] = [];
     for (let i = 0; i < localStorage.length; i += 1) {
@@ -102,14 +100,130 @@ export async function clearCloudAuth(): Promise<void> {
   } catch {
     // 隐私模式等场景下忽略
   }
+  // 本地登录态先清掉，退出不再被网络阻塞；
+  // 服务端登出放到后台执行并吞掉“load failed / 网络慢”类错误。
+  const auth = getAuth();
+  if (!auth) return;
+  try {
+    const p = auth.signOut().catch(() => {});
+    window.setTimeout(() => void p, 0);
+  } catch {
+    // 忽略
+  }
 }
 
-/** 发送邮箱验证码（需要控制台开启「邮箱验证码登录」） */
-export async function sendEmailCode(email: string) {
+/** 发送邮箱验证码（需要控制台开启「邮箱验证码登录」）；usage 用 RECOVERY 表示找回密码 */
+export async function sendEmailCode(
+  email: string,
+  usage: "EMAIL" | "RECOVERY" | "REAUTHENTICATION" = "EMAIL",
+) {
   const auth = getAuth();
   if (!auth) throw new Error("当前环境不支持邮箱登录");
-  const res = await auth.getVerification({ email });
+  const res = await auth.getVerification({ email, usage });
   return res;
+}
+
+/** 用邮箱 + 验证码 + 密码注册账号（注册后即可用 邮箱/用户名 + 密码 登录） */
+export async function registerWithPassword(params: {
+  email: string;
+  password: string;
+  name: string;
+  code: string;
+  verificationId: string;
+}) {
+  const auth = getAuth();
+  if (!auth) throw new Error("当前环境不支持邮箱登录");
+  const verified = await auth.verify({
+    verification_id: params.verificationId,
+    verification_code: params.code,
+  });
+  const token = verified.verification_token;
+  if (!token) throw new Error("验证码校验失败");
+  // CloudBase 的注册接口不区分“用户名”，它用邮箱作登录账号并直接设置密码。
+  const payload = {
+    email: params.email,
+    password: params.password,
+    verification_code: params.code,
+    verification_token: token,
+    name: params.name,
+  } as unknown as Parameters<typeof auth.signUp>[0];
+  const res = await auth.signUp(payload);
+  if (res && (res as { error?: unknown }).error) {
+    const msg = (res as { error: unknown }).error;
+    const text = typeof msg === "string" ? msg : (msg as { message?: string })?.message ?? "注册失败";
+    if (/already|exists|已存在|已注册|exist|duplicate/i.test(text)) {
+      throw new Error("该邮箱已注册，请直接登录");
+    }
+    throw new Error(text || "注册失败，请确认邮箱验证码已通过");
+  }
+}
+
+/** 用 邮箱/用户名 + 密码 登录 */
+export async function signInWithPassword(params: {
+  username: string;
+  password: string;
+}) {
+  const auth = getAuth();
+  if (!auth) throw new Error("当前环境不支持邮箱登录");
+  const res = await auth.signInWithPassword({ username: params.username, password: params.password });
+  if (res && (res as { error?: unknown }).error) {
+    const msg = (res as { error: unknown }).error;
+    const text = typeof msg === "string" ? msg : (msg as { message?: string })?.message ?? "登录失败";
+    throw new Error(text);
+  }
+}
+
+/** 通过注册邮箱 + 验证码 重置密码 */
+export async function resetPasswordViaEmail(params: {
+  email: string;
+  code: string;
+  verificationId: string;
+  newPassword: string;
+}) {
+  const auth = getAuth();
+  if (!auth) throw new Error("当前环境不支持邮箱登录");
+  const verified = await auth.verify({
+    verification_id: params.verificationId,
+    verification_code: params.code,
+  });
+  const token = verified.verification_token;
+  if (!token) throw new Error("验证码校验失败");
+  await auth.resetPassword({
+    email: params.email,
+    verification_token: token,
+    new_password: params.newPassword,
+  });
+}
+
+/** 修改登录用户名（改成自定义用户名后，即可用自定义用户名 + 密码登录） */
+export async function updateUsername(name: string) {
+  const auth = getAuth();
+  const user = auth?.currentUser as
+    | { updateUsername?: (n: string) => Promise<void> }
+    | null
+    | undefined;
+  if (!user?.updateUsername) throw new Error("当前未登录");
+  await user.updateUsername(name.trim());
+}
+
+/** 使用原密码修改密码 */
+export async function changePassword(oldPassword: string, newPassword: string) {
+  const auth = getAuth();
+  const user = auth?.currentUser as
+    | { updatePassword?: (n: string, o: string) => Promise<void> }
+    | null
+    | undefined;
+  if (!user?.updatePassword) throw new Error("当前未登录");
+  await user.updatePassword(newPassword, oldPassword);
+}
+
+/** 当前登录账号名（默认=邮箱；改过用户名后为自定义用户名） */
+export function getLoginUsername(): string {
+  const auth = getAuth();
+  const u = auth?.currentUser as { email?: string; username?: string } | null | undefined;
+  const email = u?.email || "";
+  const username = u?.username || "";
+  return username && username !== email ? username : email;
 }
 
 /**
@@ -205,9 +319,24 @@ export async function callLedger<T = Record<string, unknown>>(
   const a = getApp();
   if (!a) throw new Error("CloudBase 不可用");
   const res = await a.callFunction({ name: "ledgerApi", data });
-  const result = res.result as { ok: boolean; error?: string } & T;
-  if (!result || result.ok === false) {
-    throw new Error((result as { error?: string })?.error || "云端操作失败");
-  }
-  return result;
+  const anyRes = res as {
+    result?: unknown;
+    code?: unknown;
+    message?: unknown;
+    msg?: unknown;
+    error?: unknown;
+  };
+  const body =
+    anyRes.result !== undefined ? anyRes.result : (res as unknown);
+  const rec = (body ?? {}) as {
+    ok?: boolean;
+    error?: unknown;
+    message?: unknown;
+    msg?: unknown;
+    code?: unknown;
+  };
+  if (rec.ok === true) return body as T;
+  const msg =
+    rec.error ?? rec.message ?? rec.msg ?? anyRes.message ?? anyRes.msg ?? rec.code ?? "";
+  throw new Error(typeof msg === "string" && msg ? msg : "云端操作失败");
 }

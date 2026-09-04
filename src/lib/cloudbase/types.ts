@@ -36,7 +36,11 @@ export type CloudLedger = {
   _id: string;
   familyId: string;
   name: string;
+  ownerUid?: string;
   createdAt: number;
+  cats?: unknown[];
+  kinds?: unknown[];
+  recurring?: unknown[];
 };
 
 export type CloudTx = Tx & {

@@ -1,5 +1,9 @@
 # CloudBase 部署与配置指南
 
+> 更新：`lxh-d9g0yz4st2a85197f`（个人版，PG 模式）下数据库接入已改为
+> CloudBase JS SDK（`app.rdb()`），无需数据库账号与连接串。
+> 请以 [CLOUDBASE_PG.md](./CLOUDBASE_PG.md) 为准；下方文档为历史「文档型数据库」说明。
+
 月梨账单的“家庭共享”基于腾讯云开发 CloudBase：
 
 - 静态托管：前端页面
