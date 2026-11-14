@@ -85,7 +85,8 @@ export function DayCalendar({
             <button
               key={date.stamp}
               type="button"
-              onClick={() => {
+              onClick={() => setPicked(date.stamp)}
+              onDoubleClick={() => {
                 setPicked(date.stamp);
                 openComposer(date.stamp);
               }}
@@ -94,7 +95,8 @@ export function DayCalendar({
                 on && "bg-primary text-primary-fg",
                 !on && date.stamp === todayStamp && "bg-surface shadow-[var(--shadow-border)]",
               )}
-              aria-label={`${date.year}年${date.month}月${date.day}日，记一笔`}
+              aria-label={`${date.year}年${date.month}月${date.day}日，单击查看当天账单，双击记一笔`}
+              title="单击查看当天账单，双击记一笔"
             >
               <span className="flex items-baseline gap-0.5">
                 <span className={cn("text-xs", on ? "text-primary-fg" : "text-fg")}>
@@ -156,7 +158,7 @@ export function DayCalendar({
         {selected
           ? ` · 支 ${formatYuan(selected.expense)} · 收 ${formatYuan(selected.income)}`
           : " · 没有记录"}
-        <span className="ml-2 text-subtle">点日期可直接记一笔</span>
+        <span className="ml-2 text-subtle">单击看账单 · 双击记一笔</span>
       </p>
       {monthHasMark ? (
         <p className="mt-1 text-[10px] text-subtle">
