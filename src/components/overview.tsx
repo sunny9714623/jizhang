@@ -4,19 +4,14 @@ import {
   formatSignedYuan,
 } from "@/lib/ledger";
 import { leafColor, leafLabel } from "@/lib/categories";
-import { daysUntil } from "@/lib/models";
-import { dueRecurring, recordedToday } from "@/lib/remind";
 import { monthStats, useLedger } from "@/lib/ledger-store";
-import { txsInLedger, inLedger, DEFAULT_LEDGER_ID } from "@/lib/ledgers";
+import { txsInLedger, DEFAULT_LEDGER_ID } from "@/lib/ledgers";
 import { CatMark } from "@/components/cat-mark";
 import { Donut } from "@/components/donut";
 import { MonthBar } from "@/components/month-bar";
 import { DayCalendar } from "@/components/day-calendar";
-import { TxRow } from "@/components/tx-list";
-import { SortBar, sortTxs, type AmountSort } from "@/components/amount-sort";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { inPeriod, periodElapsedDays } from "@/lib/period";
+import { periodElapsedDays } from "@/lib/period";
 
 export function Overview() {
   const allTxs = useLedger((s) => s.txs);
@@ -29,13 +24,8 @@ export function Overview() {
   const setCatFilter = useLedger((s) => s.setCatFilter);
   const cats = useLedger((s) => s.cats);
   const usingSample = useLedger((s) => s.usingSample);
-  const recurringAll = useLedger((s) => s.recurring);
-  const recurring = inLedger(recurringAll, ledgerId);
-  const payRecurring = useLedger((s) => s.payRecurring);
-  const openComposer = useLedger((s) => s.openComposer);
   const stats = monthStats(txs, month, cats, periodMode);
   const [side, setSide] = useState<"expense" | "income">("expense");
-  const [recentSort, setRecentSort] = useState<AmountSort>("time");
   const catRows = cats
     .filter((c) => c.direction === "expense")
     .map((c) => ({
@@ -85,51 +75,10 @@ export function Overview() {
   const chartTotal = side === "expense" ? stats.expense : stats.income;
   const daysElapsed = periodElapsedDays(month, periodMode);
   const daily = stats.expense / daysElapsed;
-  const recent = sortTxs(
-    txs.filter((t) => inPeriod(t.time, month, periodMode)),
-    recentSort,
-  ).slice(0, 6);
-  const due = dueRecurring(recurring);
-  const needRecord = !usingSample && !recordedToday(txs);
   const showSample = usingSample && ledgerId === DEFAULT_LEDGER_ID;
 
   return (
     <div className="flex flex-col gap-5 pb-8">
-      {needRecord ? (
-        <button
-          type="button"
-          onClick={() => openComposer()}
-          className="rounded-md bg-elevated px-4 py-3 text-left text-sm text-fg shadow-[var(--shadow-border)]"
-        >
-          今天还没记账，点这里十秒记一笔
-        </button>
-      ) : null}
-      {due.length > 0 ? (
-        <section className="rounded-xl bg-elevated px-4 py-3 shadow-[var(--shadow-border)]">
-          <p className="font-display text-lg text-fg">到期账单</p>
-          <ul className="mt-2 flex flex-col gap-2">
-            {due.map((r) => {
-              const left = daysUntil(r.nextDue);
-              return (
-                <li key={r.id} className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1 text-sm">
-                    {r.title}
-                    <span className="text-muted">
-                      {" · "}
-                      {left < 0 ? "已过" : left === 0 ? "今天" : `${left}天后`}
-                    </span>
-                  </span>
-                  <span className="text-sm tabular-nums text-muted">{formatYuan(r.amountFen)}</span>
-                  <Button type="button" size="sm" onClick={() => void payRecurring(r.id)}>
-                    已付
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ) : null}
-
       <section className="rounded-xl bg-elevated px-5 pt-5 pb-4 shadow-[var(--shadow-border)]">
         <MonthBar />
         <p className="mt-3 text-xs tracking-wide text-muted">
@@ -255,19 +204,6 @@ export function Overview() {
         <p className="py-8 text-center text-sm text-muted">这个月还没有记录</p>
       )}
 
-      {recent.length > 0 ? (
-        <section>
-          <div className="mb-3 flex items-baseline justify-between px-1">
-            <h2 className="font-display text-xl text-fg">最近</h2>
-            <SortBar value={recentSort} onChange={setRecentSort} />
-          </div>
-          <div className="overflow-hidden rounded-lg bg-elevated shadow-[var(--shadow-border)]">
-            {recent.map((tx, i) => (
-              <TxRow key={tx.id} tx={tx} lined={i > 0} />
-            ))}
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }
