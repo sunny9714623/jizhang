@@ -117,3 +117,10 @@ export function periodMonthForTime(time: number, mode: PeriodMode) {
   const current = `${date.year}-${date.month}`;
   return date.day >= 15 ? current : shiftMonth(current, -1);
 }
+
+export function periodMonthForStamp(stamp: string, mode: PeriodMode) {
+  if (mode === "calendar") return stamp.slice(0, 7);
+  const date = periodDay(stamp);
+  const current = `${date.year}-${pad(date.month)}`;
+  return date.day >= 15 ? current : shiftMonth(current, -1);
+}

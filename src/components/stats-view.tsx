@@ -1,8 +1,20 @@
 import { useMemo, useRef, useState } from "react";
-import { formatYuan, formatSignedYuan, shanghaiDate, signedYuan, type Tx } from "@/lib/ledger";
+import {
+  formatYuan,
+  formatSignedYuan,
+  shanghaiDate,
+  shiftMonth,
+  signedYuan,
+  type Tx,
+} from "@/lib/ledger";
 import { leafLabel, type CatLeaf } from "@/lib/categories";
 import { txsInLedger } from "@/lib/ledgers";
 import { useLedger } from "@/lib/ledger-store";
+import {
+  periodBounds,
+  periodLabel,
+  periodMonthForStamp,
+} from "@/lib/period";
 import { CatMark } from "@/components/cat-mark";
 import { cn } from "@/lib/utils";
 
@@ -10,7 +22,7 @@ const EXPENSE = "#c45c4a";
 const INCOME = "#2f5d50";
 const BALANCE = "#8c6b4a";
 
-type Span = "day" | "month" | "year";
+type Span = "day" | "month" | "cycle15" | "year";
 type Point = { key: string; label: string; expense: number; income: number; net: number };
 
 function pad(n: number) {
@@ -26,7 +38,39 @@ function chartValue(fen: number): string {
   return `${sign}¥${text}`;
 }
 
-function seriesFor(txs: Tx[], span: Span, year: string, month: string, day: string): Point[] {
+function seriesFor(
+  txs: Tx[],
+  span: Span,
+  year: string,
+  month: string,
+  day: string,
+  cycleMonth: string,
+): Point[] {
+  if (span === "cycle15") {
+    const byKey = new Map<string, Point>();
+    for (let off = -5; off <= 5; off++) {
+      const key = shiftMonth(cycleMonth, off);
+      const start = periodBounds(key, "cycle15").start.split("-").map(Number);
+      byKey.set(key, {
+        key,
+        label: `${start[1]}/${start[2]}`,
+        expense: 0,
+        income: 0,
+        net: 0,
+      });
+    }
+    for (const tx of txs) {
+      const date = shanghaiDate(tx.time);
+      const stamp = `${date.year}-${date.month}-${pad(date.day)}`;
+      const bucket = byKey.get(periodMonthForStamp(stamp, "cycle15"));
+      if (!bucket) continue;
+      if (tx.direction === "expense") bucket.expense += tx.amountFen;
+      else if (tx.direction === "income") bucket.income += tx.amountFen;
+    }
+    const points = [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+    for (const point of points) point.net = point.income - point.expense;
+    return points;
+  }
   if (span === "day") {
     const center = new Date(Number(year), Number(month) - 1, Number(day));
     const byKey = new Map<string, Point>();
@@ -90,6 +134,7 @@ function topRecords(
   year: string,
   month: string,
   day: string,
+  cycleMonth: string,
   side: "expense" | "income",
 ): Tx[] {
   return txs
@@ -98,6 +143,10 @@ function topRecords(
       const p = shanghaiDate(tx.time);
       if (span === "day") return `${p.year}-${p.month}-${pad(p.day)}` === `${year}-${month}-${day}`;
       if (span === "month") return `${p.year}-${p.month}` === `${year}-${month}`;
+      if (span === "cycle15") {
+        const stamp = `${p.year}-${p.month}-${pad(p.day)}`;
+        return periodMonthForStamp(stamp, "cycle15") === cycleMonth;
+      }
       return p.year === year;
     })
     .sort((a, b) => b.amountFen - a.amountFen)
@@ -108,6 +157,7 @@ export function StatsView() {
   const all = useLedger((s) => s.txs);
   const ledgerId = useLedger((s) => s.ledgerId);
   const storeMonth = useLedger((s) => s.month);
+  const storePeriodMode = useLedger((s) => s.periodMode);
   const cats = useLedger((s) => s.cats);
   const select = useLedger((s) => s.select);
   const txs = useMemo(
@@ -115,35 +165,63 @@ export function StatsView() {
     [all, ledgerId],
   );
   const today = shanghaiDate(Date.now());
-  const [span, setSpan] = useState<Span>("day");
+  const initialDay = storeMonth === `${today.year}-${today.month}` ? pad(today.day) : "01";
+  const [span, setSpan] = useState<Span>(
+    storePeriodMode === "cycle15" ? "cycle15" : "day",
+  );
   const [chart, setChart] = useState<"bar" | "line">("bar");
   const [year, setYear] = useState(storeMonth.slice(0, 4));
   const [month, setMonth] = useState(storeMonth.slice(5, 7));
-  const [day, setDay] = useState(() =>
-    storeMonth === `${today.year}-${today.month}` ? pad(today.day) : "01",
+  const [day, setDay] = useState(initialDay);
+  const [cycleMonth, setCycleMonth] = useState(() =>
+    periodMonthForStamp(`${storeMonth}-${initialDay}`, "cycle15"),
   );
-  const [side, setSide] = useState<"expense" | "income">("expense");
-  const points = useMemo(() => seriesFor(txs, span, year, month, day), [txs, span, year, month, day]);
-  const tops = useMemo(
-    () => topRecords(txs, span, year, month, day, side),
-    [txs, span, year, month, day, side],
-  );
-  const max = Math.max(1, ...points.flatMap((p) => [p.expense, p.income, Math.abs(p.net)]));
   const dateValue = `${year}-${month}-${day}`;
   const monthValue = `${year}-${month}`;
-  const activeKey = span === "year" ? year : span === "month" ? monthValue : dateValue;
+  const currentCycleMonth = periodMonthForStamp(
+    `${today.year}-${today.month}-${pad(today.day)}`,
+    "cycle15",
+  );
+  const [side, setSide] = useState<"expense" | "income">("expense");
+  const points = useMemo(
+    () => seriesFor(txs, span, year, month, day, cycleMonth),
+    [txs, span, year, month, day, cycleMonth],
+  );
+  const tops = useMemo(
+    () => topRecords(txs, span, year, month, day, cycleMonth, side),
+    [txs, span, year, month, day, cycleMonth, side],
+  );
+  const max = Math.max(1, ...points.flatMap((p) => [p.expense, p.income, Math.abs(p.net)]));
+  const activeKey =
+    span === "year"
+      ? year
+      : span === "month"
+        ? monthValue
+        : span === "cycle15"
+          ? cycleMonth
+          : dateValue;
   const active = points.find((p) => p.key === activeKey);
   const sumExp = active?.expense ?? 0;
   const sumInc = active?.income ?? 0;
-  const period = span === "day" ? "当日" : span === "month" ? "当月" : "当年";
+  const period =
+    span === "day"
+      ? "当日"
+      : span === "month"
+        ? "当月"
+        : span === "cycle15"
+          ? "本期"
+          : "当年";
 
   const isToday = dateValue === `${today.year}-${today.month}-${pad(today.day)}`;
   const isCurMonth = monthValue === `${today.year}-${today.month}`;
   const isCurYear = year === today.year;
+  const isCurCycle = cycleMonth === currentCycleMonth;
   const prevDate = new Date(Number(year), Number(month) - 1, Number(day) - 1);
   const nextDate = new Date(Number(year), Number(month) - 1, Number(day) + 1);
   const prevMonth = new Date(Number(year), Number(month) - 2, 1);
   const nextMonth = new Date(Number(year), Number(month), 1);
+  const prevCycle = shiftMonth(cycleMonth, -1);
+  const nextCycle = shiftMonth(cycleMonth, 1);
   const prevLabel =
     span === "day"
       ? isToday
@@ -153,9 +231,13 @@ export function StatsView() {
         ? isCurMonth
           ? "上月"
           : `${prevMonth.getMonth() + 1}月`
-        : isCurYear
-          ? "去年"
-          : `${Number(year) - 1}年`;
+        : span === "cycle15"
+          ? isCurCycle
+            ? "上期"
+            : `${Number(prevCycle.slice(5))}月`
+          : isCurYear
+            ? "去年"
+            : `${Number(year) - 1}年`;
   const nextLabel =
     span === "day"
       ? isToday
@@ -165,11 +247,19 @@ export function StatsView() {
         ? isCurMonth
           ? "下月"
           : `${nextMonth.getMonth() + 1}月`
-        : isCurYear
-          ? "明年"
-          : `${Number(year) + 1}年`;
+        : span === "cycle15"
+          ? isCurCycle
+            ? "下期"
+            : `${Number(nextCycle.slice(5))}月`
+          : isCurYear
+            ? "明年"
+            : `${Number(year) + 1}年`;
 
   const shift = (dir: number) => {
+    if (span === "cycle15") {
+      setCycleMonth(shiftMonth(cycleMonth, dir));
+      return;
+    }
     if (span === "year") {
       setYear(String(Number(year) + dir));
       return;
@@ -194,6 +284,8 @@ export function StatsView() {
     } else if (span === "month" && key.length >= 7) {
       setYear(key.slice(0, 4));
       setMonth(key.slice(5, 7));
+    } else if (span === "cycle15" && key.length >= 7) {
+      setCycleMonth(key.slice(0, 7));
     } else if (span === "year") {
       setYear(key);
     }
@@ -202,20 +294,26 @@ export function StatsView() {
   return (
     <div className="flex flex-col gap-5 pb-8">
       <section className="rounded-xl bg-elevated px-4 py-4 shadow-[var(--shadow-border)]">
-        <div className="mx-auto flex w-fit rounded-full bg-surface p-0.5 shadow-[var(--shadow-border)]">
+        <div className="grid grid-cols-4 rounded-full bg-surface p-0.5 shadow-[var(--shadow-border)]">
           {(
             [
               ["day", "每日趋势"],
               ["month", "每月趋势"],
+              ["cycle15", "15日周期"],
               ["year", "每年趋势"],
             ] as const
           ).map(([id, label]) => (
             <button
               key={id}
               type="button"
-              onClick={() => setSpan(id)}
+              onClick={() => {
+                setSpan(id);
+                if (id === "cycle15") {
+                  setCycleMonth(periodMonthForStamp(dateValue, "cycle15"));
+                }
+              }}
               className={cn(
-                "h-9 whitespace-nowrap rounded-full px-4 text-xs",
+                "h-11 whitespace-nowrap rounded-full px-1 text-xs",
                 span === id ? "bg-primary text-primary-fg" : "text-muted",
               )}
             >
@@ -228,13 +326,21 @@ export function StatsView() {
             <button
               type="button"
               onClick={() => shift(-1)}
-              className="h-10 min-w-16 rounded-full px-3 text-xs text-muted"
-              aria-label={span === "day" ? "前一天" : span === "month" ? "上个月" : "上一年"}
+              className="h-11 min-w-12 rounded-full px-2 text-xs text-muted"
+              aria-label={
+                span === "day"
+                  ? "前一天"
+                  : span === "month"
+                    ? "上个月"
+                    : span === "cycle15"
+                      ? "上一个15日周期"
+                      : "上一年"
+              }
             >
               {prevLabel}
             </button>
             {span === "day" ? (
-              <label className="relative flex h-10 min-w-24 cursor-pointer flex-col items-center justify-center rounded-full bg-primary px-4 text-primary-fg">
+              <label className="relative flex h-11 min-w-28 cursor-pointer flex-col items-center justify-center rounded-full bg-primary px-4 text-primary-fg">
                 {isToday ? <span className="text-[10px] leading-none opacity-80">当日</span> : null}
                 <span className="font-display text-sm leading-tight">
                   {Number(month)}月{Number(day)}日
@@ -254,7 +360,7 @@ export function StatsView() {
                 />
               </label>
             ) : span === "month" ? (
-              <label className="relative flex h-10 min-w-24 cursor-pointer flex-col items-center justify-center rounded-full bg-primary px-4 text-primary-fg">
+              <label className="relative flex h-11 min-w-28 cursor-pointer flex-col items-center justify-center rounded-full bg-primary px-4 text-primary-fg">
                 {isCurMonth ? <span className="text-[10px] leading-none opacity-80">当月</span> : null}
                 <span className="font-display text-sm leading-tight">{Number(month)}月</span>
                 <input
@@ -270,8 +376,27 @@ export function StatsView() {
                   aria-label="选择月份"
                 />
               </label>
+            ) : span === "cycle15" ? (
+              <label className="relative flex h-11 min-w-36 cursor-pointer flex-col items-center justify-center rounded-full bg-primary px-3 text-primary-fg">
+                <span className="text-[10px] leading-none opacity-80">
+                  {isCurCycle ? "本期" : "周期"}
+                </span>
+                <span className="font-display text-xs leading-tight">
+                  {periodLabel(cycleMonth, "cycle15")}
+                </span>
+                <input
+                  type="month"
+                  value={cycleMonth}
+                  onChange={(e) => {
+                    if (e.target.value) setCycleMonth(e.target.value.slice(0, 7));
+                  }}
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                  style={{ fontSize: 16 }}
+                  aria-label="选择15日周期起始月份"
+                />
+              </label>
             ) : (
-              <label className="relative flex h-10 min-w-24 cursor-pointer flex-col items-center justify-center rounded-full bg-primary px-4 text-primary-fg">
+              <label className="relative flex h-11 min-w-28 cursor-pointer flex-col items-center justify-center rounded-full bg-primary px-4 text-primary-fg">
                 {isCurYear ? <span className="text-[10px] leading-none opacity-80">当年</span> : null}
                 <span className="font-display text-sm leading-tight">{year}年</span>
                 <input
@@ -291,13 +416,26 @@ export function StatsView() {
             <button
               type="button"
               onClick={() => shift(1)}
-              className="h-10 min-w-16 rounded-full px-3 text-xs text-muted"
-              aria-label={span === "day" ? "后一天" : span === "month" ? "下个月" : "下一年"}
+              className="h-11 min-w-12 rounded-full px-2 text-xs text-muted"
+              aria-label={
+                span === "day"
+                  ? "后一天"
+                  : span === "month"
+                    ? "下个月"
+                    : span === "cycle15"
+                      ? "下一个15日周期"
+                      : "下一年"
+              }
             >
               {nextLabel}
             </button>
           </div>
         </div>
+        {span === "cycle15" ? (
+          <p className="mt-2 text-center text-xs text-subtle">
+            按每月15日至次月15日统计
+          </p>
+        ) : null}
         <div className="mx-auto mt-2 grid w-fit grid-cols-3 gap-4 text-center text-xs">
           <div>
             <p className="text-muted">{period}支出</p>
@@ -340,7 +478,13 @@ export function StatsView() {
       <section className="rounded-xl bg-elevated px-4 py-4 shadow-[var(--shadow-border)]">
         <div className="flex items-baseline justify-between">
           <h2 className="font-display text-xl text-fg">
-            {span === "day" ? "当日" : span === "month" ? "当月" : "当年"}
+            {span === "day"
+              ? "当日"
+              : span === "month"
+                ? "当月"
+                : span === "cycle15"
+                  ? "本周期"
+                  : "当年"}
             {side === "expense" ? "支出" : "收入"} Top 10
           </h2>
           <div className="flex gap-1">
