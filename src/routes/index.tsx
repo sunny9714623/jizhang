@@ -11,7 +11,7 @@ import { StatsView } from "@/components/stats-view";
 import { TxDetail, TxList } from "@/components/tx-list";
 import { Button } from "@/components/ui/button";
 import { WallpaperControls, WallpaperLayer, isPhotoWall, wallNeedsLightText } from "@/components/wallpaper";
-import { monthLabel } from "@/lib/ledger";
+import { periodLabel } from "@/lib/period";
 import { txsInLedger, inLedger } from "@/lib/ledgers";
 import { dueRecurring, fireDueNotifications, recordedToday } from "@/lib/remind";
 import { useLedger, type Tab } from "@/lib/ledger-store";
@@ -104,6 +104,7 @@ function Home() {
   const tab = useLedger((s) => s.tab);
   const setTab = useLedger((s) => s.setTab);
   const month = useLedger((s) => s.month);
+  const periodMode = useLedger((s) => s.periodMode);
   const cloudLedgers = useLedger((s) => s.cloudLedgers);
   const openComposer = useLedger((s) => s.openComposer);
   const wallpaper = useLedger((s) => s.wallpaper);
@@ -228,7 +229,7 @@ function Home() {
               </p>
             </button>
             <p className={cn("mt-1 text-xs", lightTitle ? "text-primary-fg/80" : "text-muted")}>
-              {monthLabel(month)}
+              {periodLabel(month, periodMode)}
             </p>
           </div>
           <WallpaperControls />
@@ -243,7 +244,7 @@ function Home() {
             {dark ? <Sun /> : <Moon />}
           </Button>
           {tab !== "import" && tab !== "books" ? (
-            <Button size="sm" className="shrink-0" onClick={openComposer}>
+            <Button size="sm" className="shrink-0" onClick={() => openComposer()}>
               <Plus />
               记一笔
             </Button>

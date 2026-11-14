@@ -59,7 +59,7 @@ function httpsJson(path, headers, body) {
           "Content-Type": "application/json",
           "Content-Length": data.length,
         },
-        timeout: 100000,
+        timeout: 180000,
       },
       (res) => {
         const chunks = [];
@@ -203,6 +203,7 @@ function systemPrompt(context) {
 - 提问与闲聊：直接简明回答，可引用账本里的真实数据。
 - reply 一般不超过 600 字。
 - 数据都在下方 [账本数据] 里：months 是账本全部月份的汇总（从最旧到最新），recent 是最近流水，upcoming 是近期待付，year 是用户所选年份的每一笔完整流水（未截断、可能很长，做年度分析时务必基于它逐笔分析）；只能引用其中的数字，不能编造。
+- 若 [账本数据] 里带 focus（如“分类「餐饮」”或“2026-09 月”），表示用户要看那一部分的深层分析：请重点基于 txs（该范围内的逐笔明细）逐条分析，找出规律、异常与建议；不要只看汇总。
 
 只输出一个 JSON 对象（不要输出 JSON 以外的内容）：
 {"reply": "…", "drafts": [{"date":"YYYY-MM-DD","amountFen":2380,"direction":"expense","merchant":"瑞幸","category":"food","note":"…"}]}

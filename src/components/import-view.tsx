@@ -168,7 +168,7 @@ export function ImportView() {
 
       <button
         type="button"
-        onClick={openComposer}
+        onClick={() => openComposer()}
         className="flex items-center gap-3 rounded-lg bg-elevated px-4 py-4 text-left shadow-[var(--shadow-border)]"
       >
         <HandCoins className="size-5 text-primary" />

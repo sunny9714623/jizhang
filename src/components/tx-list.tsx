@@ -170,6 +170,7 @@ export function TxList() {
   const ledgerId = useLedger((s) => s.ledgerId);
   const txs = txsInLedger(allTxs, ledgerId);
   const month = useLedger((s) => s.month);
+  const periodMode = useLedger((s) => s.periodMode);
   const search = useLedger((s) => s.search);
   const setSearch = useLedger((s) => s.setSearch);
   const catFilter = useLedger((s) => s.catFilter);
@@ -178,7 +179,15 @@ export function TxList() {
   const setGroupFilter = useLedger((s) => s.setGroupFilter);
   const cats = useLedger((s) => s.cats);
   const removeMany = useLedger((s) => s.removeMany);
-  const shown = visibleTxs(txs, month, search, catFilter, groupFilter, cats);
+  const shown = visibleTxs(
+    txs,
+    month,
+    search,
+    catFilter,
+    groupFilter,
+    cats,
+    periodMode,
+  );
   const filterLabel = groupFilter
     ? findGroup(groupFilter)?.name
     : catFilter
@@ -200,7 +209,7 @@ export function TxList() {
 
   useEffect(() => {
     setPage(1);
-  }, [month, search, catFilter, groupFilter, size, sort]);
+  }, [month, periodMode, search, catFilter, groupFilter, size, sort]);
 
   const groups: { label: string; items: Tx[] }[] = [];
   if (sort === "time") {
@@ -241,7 +250,8 @@ export function TxList() {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜商家 / 支付方式 / 说明 / 备注 / 分类"
+            placeholder="搜商家 / 金额 / 支付方式 / 备注 / 分类"
+            enterKeyHint="search"
             className="relative z-20 h-11 w-full rounded-md bg-elevated px-4 text-fg shadow-[var(--shadow-border)] placeholder:text-subtle focus:outline-none focus:ring-2 focus:ring-fg/20"
           />
         </label>
@@ -319,7 +329,11 @@ export function TxList() {
       </div>
       {shown.length === 0 ? (
         <p className="py-16 text-center text-sm text-muted">
-          {filterLabel ? `这个月没有「${filterLabel}」` : "这个月还没有记录"}
+          {search.trim()
+            ? `没有找到“${search.trim()}”相关的账单`
+            : filterLabel
+              ? `这个周期没有「${filterLabel}」`
+              : "这个周期还没有记录"}
         </p>
       ) : (
         groups.map((g) => (

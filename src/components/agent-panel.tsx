@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Copy,
@@ -17,11 +17,11 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { agentTurn } from "@/lib/agent-transport";
-import { agentContext } from "@/lib/agent-context";
+import { agentAnalysisContext, agentContext } from "@/lib/agent-context";
 import { dbGetMeta, dbSetMeta } from "@/lib/ledger-db";
 import { fileToJpegDataUrl, useLedger } from "@/lib/ledger-store";
 import { leafLabel } from "@/lib/categories";
-import { shanghaiDayValue } from "@/lib/ledger";
+import { monthKey, shanghaiDayValue } from "@/lib/ledger";
 import { Button } from "@/components/ui/button";
 import type { AgentDraft, AgentHistoryMsg, AgentImageInput } from "@/lib/agent-types";
 
@@ -118,6 +118,10 @@ const QUICK_CHIPS = [
 export function AgentFloatingChat() {
   const recordMany = useLedger((s) => s.recordMany);
   const cats = useLedger((s) => s.cats);
+  const tab = useLedger((s) => s.tab);
+  const txsAll = useLedger((s) => s.txs);
+  const ledgerId = useLedger((s) => s.ledgerId);
+  const month = useLedger((s) => s.month);
   const [open, setOpen] = useState(false);
   const [msgs, setMsgsState] = useState<UiMsg[]>(() => liveMsgs);
   const [edits, setEditsState] = useState<Record<string, AgentDraft>>(() => liveEdits);
@@ -134,6 +138,22 @@ export function AgentFloatingChat() {
   const [nameDraft, setNameDraft] = useState(DEFAULT_PROFILE.name);
   const [savedKey, setSavedKey] = useState("");
   const [keyDraft, setKeyDraft] = useState("");
+
+  // 汇总分析后，可点分类下钻：给模型单独那部分的流水细看
+  const deepChips = useMemo(() => {
+    const scoped = txsAll.filter(
+      (t) =>
+        (t.ledgerId ?? "default") === ledgerId &&
+        t.direction === "expense" &&
+        monthKey(t.time) === month,
+    );
+    const byCat = new Map<string, number>();
+    for (const t of scoped) byCat.set(t.category, (byCat.get(t.category) ?? 0) + t.amountFen);
+    return [...byCat.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([id]) => ({ label: leafLabel(cats, id), filter: { category: id } as const }));
+  }, [txsAll, ledgerId, month, cats]);
 
   const msgsRef = useRef(msgs);
   const editsRef = useRef(edits);
@@ -162,6 +182,11 @@ export function AgentFloatingChat() {
       recRef.current?.abort();
     };
   }, []);
+
+  // 切到流水/统计/入账时关闭 AI 助手窗口
+  useEffect(() => {
+    if (tab === "list" || tab === "stats" || tab === "import") setOpen(false);
+  }, [tab]);
 
   useEffect(() => {
     void Promise.all([
@@ -207,6 +232,7 @@ export function AgentFloatingChat() {
   const finish = async (
     text: string,
     image?: AgentImageInput | null,
+    filter?: { category?: string; month?: string },
   ): Promise<void> => {
     const raw = text.trim();
     if (busyRef.current) return;
@@ -245,11 +271,14 @@ export function AgentFloatingChat() {
 
     let result;
     try {
+      // 分析/下钻类请求：前端已算好紧凑汇总，让模型只写简短解读，绕开网关超时。
+      const isAnalysis = !image && /分析|支出|总结|趋势|建议/.test(userText);
+      const context = isAnalysis || filter ? agentAnalysisContext() : agentContext();
       result = await agentTurn({
         key: savedKey || undefined,
         msgs: history,
         image: image ?? null,
-        context: agentContext(),
+        context,
       });
     } catch (err) {
       const raw = err instanceof Error ? err.message : "";
@@ -429,6 +458,8 @@ export function AgentFloatingChat() {
     };
     setProfile(clean);
     void dbSetMeta(PROFILE_KEY, clean);
+    // 保存名字/图标后关闭设置编辑区
+    setShowKey(false);
   };
 
   const saveKey = () => {
@@ -726,6 +757,22 @@ export function AgentFloatingChat() {
               </ul>
             )}
           </div>
+        </div>
+      ) : null}
+
+      {deepChips.length ? (
+        <div className="flex shrink-0 flex-wrap gap-1.5 border-t border-border px-4 pt-2 pb-1">
+          <span className="self-center text-[11px] text-subtle">深入看：</span>
+          {deepChips.map((c) => (
+            <button
+              key={c.filter.category}
+              type="button"
+              onClick={() => void finish(`请深入分析「${c.label}」这个分类的本月消费，逐笔找规律与异常`, undefined, c.filter)}
+              className="rounded-full bg-surface px-2.5 py-1 text-xs text-fg shadow-[var(--shadow-border)]"
+            >
+              {c.label}
+            </button>
+          ))}
         </div>
       ) : null}
 

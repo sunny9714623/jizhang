@@ -88,6 +88,10 @@ export type AgentContext = {
     year: string;
     txs: AgentTxBrief[];
   };
+  /** 深度下钻：明确要分析的范围（某个分类 / 某个月） */
+  focus?: string;
+  /** 深度下钻：该范围内的流水明细 */
+  txs?: AgentTxBrief[];
 };
 
 export type AgentPayload = {

@@ -64,7 +64,9 @@ function briefDirection(direction: Tx["direction"]): AgentDirection {
   return direction === "income" ? "income" : "expense";
 }
 
-export function agentContext(): AgentContext {
+type DeepFilter = { category?: string; month?: string };
+
+export function agentContext(filter?: DeepFilter): AgentContext {
   const s = useLedger.getState();
   const ledgerId = s.ledgerId;
   const txs = txsInLedger(s.txs, ledgerId);
@@ -76,7 +78,7 @@ export function agentContext(): AgentContext {
   // 不限当月：给最近 40 笔（跨所有月份），避免 AI 只看到当前月数据
   const recent: AgentTxBrief[] = [...usable]
     .sort((a, b) => b.time - a.time)
-    .slice(0, 40)
+    .slice(0, 20)
     .map((tx) => ({
       day: shanghaiDayValue(tx.time).slice(5),
       merchant: tx.merchant || tx.title || "未注明对方",
@@ -109,18 +111,11 @@ export function agentContext(): AgentContext {
         }
       : undefined;
 
-  // 年度分析需求：把当前查看月份所属“年”的全部流水整份放进上下文，不做截取
+  // 年度分析：以“整年汇总（各月 + 各分类 + 总额）为主”供模型分析，
+  // 不逐条灌入几千笔原始流水（那样会让模型超时/无法解析），但数据是整年的、完整的。
   const year = month.slice(0, 4);
-  const yearTxs: AgentTxBrief[] = usable
-    .filter((tx) => monthKey(tx.time).startsWith(`${year}-`))
-    .sort((a, b) => a.time - b.time)
-    .map((tx) => ({
-      day: shanghaiDayValue(tx.time).slice(5),
-      merchant: tx.merchant || tx.title || "未注明对方",
-      category: leafLabel(cats, tx.category),
-      direction: briefDirection(tx.direction),
-      fen: tx.amountFen,
-    }));
+  const yearMonths = months.filter((m) => m && m.month.startsWith(`${year}-`));
+  const yearTxs: AgentTxBrief[] = [];
 
   const upcoming: AgentRecurringBrief[] = inLedger(s.recurring, ledgerId)
     .filter((r) => r.active && !r.id.startsWith("sample"))
@@ -138,6 +133,49 @@ export function agentContext(): AgentContext {
     name: c.name,
     direction: c.direction,
   }));
+
+  // 深度下钻：只给“该范围内的逐笔流水 + 一句说明”，不再叠加整年汇总，避免请求过大导致网关超时/拒绝。
+  if (filter?.category || filter?.month) {
+    const scoped = (filter.category
+      ? usable.filter((tx) => tx.category === filter.category)
+      : usable.filter((tx) => monthKey(tx.time) === filter.month)
+    )
+      .sort((a, b) => b.time - a.time)
+      .slice(0, 50)
+      .map((tx) => ({
+        day: shanghaiDayValue(tx.time).slice(5),
+        merchant: tx.merchant || tx.title || "未注明对方",
+        category: leafLabel(cats, tx.category),
+        direction: briefDirection(tx.direction),
+        fen: tx.amountFen,
+      }));
+    const focus = filter.category
+      ? `分类「${leafLabel(cats, filter.category)}」`
+      : `${filter.month} 月`;
+    return {
+      app: "月梨账单",
+      ledger: s.ledgers.find((l) => l.id === ledgerId)?.name ?? "月梨账单",
+      today: shanghaiDayValue(Date.now()),
+      usingSample: s.usingSample,
+      month: {
+        month,
+        label: month,
+        daysElapsed: 1,
+        expenseFen: 0,
+        incomeFen: 0,
+        balanceFen: 0,
+        count: 0,
+        dailyFen: 0,
+        top: [],
+      },
+      prev: null,
+      recent: [],
+      cats: cats.map((c) => ({ id: c.id, name: c.name, direction: c.direction })),
+      upcoming: [],
+      focus,
+      txs: scoped,
+    };
+  }
 
   return {
     app: "月梨账单",
@@ -162,5 +200,53 @@ export function agentContext(): AgentContext {
     year: { year, txs: yearTxs },
     cats: catsInfo,
     upcoming,
+  };
+}
+
+/** 前端本地算好的紧凑分析摘要：只含数字汇总，不逐条给流水，模型据此写简短解读即可，响应可控不超时。 */
+export function agentAnalysisContext(): AgentContext {
+  const s = useLedger.getState();
+  const ledgerId = s.ledgerId;
+  const txs = txsInLedger(s.txs, ledgerId);
+  const usable = txs.filter((tx) => !isAccountTx(tx));
+  const month = s.month || monthKey(Date.now());
+  const cats = s.cats;
+  const prevKey = previousMonth(month);
+  const cur = buildMonth(usable, month, cats, 8);
+  const prev = prevKey ? buildMonth(usable, prevKey, cats, 8) : null;
+  const monthKeys = [...new Set(usable.map((tx) => monthKey(tx.time)))].sort();
+  const months = monthKeys
+    .map((key) => buildMonth(usable, key, cats, 5))
+    .filter((m): m is NonNullable<typeof m> => m !== null);
+  const expense = months.reduce((n, m) => n + m.expenseFen, 0);
+  const income = months.reduce((n, m) => n + m.incomeFen, 0);
+  return {
+    app: "月梨账单",
+    ledger: s.ledgers.find((l) => l.id === ledgerId)?.name ?? "月梨账单",
+    today: shanghaiDayValue(Date.now()),
+    usingSample: s.usingSample,
+    month: cur ?? {
+      month,
+      label: month,
+      daysElapsed: 1,
+      expenseFen: 0,
+      incomeFen: 0,
+      balanceFen: 0,
+      count: 0,
+      dailyFen: 0,
+      top: [],
+    },
+    prev,
+    recent: [],
+    cats: cats.map((c) => ({ id: c.id, name: c.name, direction: c.direction })),
+    upcoming: [],
+    months,
+    span: {
+      firstMonth: months.length ? months[0].month : month,
+      lastMonth: months.length ? months[months.length - 1].month : month,
+      count: months.reduce((n, m) => n + m.count, 0),
+      expenseFen: expense,
+      incomeFen: income,
+    },
   };
 }

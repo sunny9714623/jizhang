@@ -1,5 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatYuan, shanghaiDate, type Tx } from "@/lib/ledger";
+import {
+  periodDates,
+  type PeriodDay,
+  type PeriodMode,
+} from "@/lib/period";
+import { useLedger } from "@/lib/ledger-store";
 import { TxRow } from "@/components/tx-list";
 import { SortBar, sortTxs, type AmountSort } from "@/components/amount-sort";
 import { cn } from "@/lib/utils";
@@ -7,43 +13,56 @@ import { holidayOf } from "@/lib/holidays";
 
 const WEEK = ["一", "二", "三", "四", "五", "六", "日"];
 
-function dayStamp(year: string, month: string, day: number) {
-  return `${year}-${month}-${String(day).padStart(2, "0")}`;
-}
-
-export function DayCalendar({ txs, month }: { txs: Tx[]; month: string }) {
-  const year = month.slice(0, 4);
-  const mo = month.slice(5, 7);
-  const daysInMonth = new Date(Number(year), Number(mo), 0).getDate();
+export function DayCalendar({
+  txs,
+  month,
+  periodMode,
+}: {
+  txs: Tx[];
+  month: string;
+  periodMode: PeriodMode;
+}) {
+  const openComposer = useLedger((s) => s.openComposer);
   const today = shanghaiDate(Date.now());
   const todayStamp = `${today.year}-${today.month}-${String(today.day).padStart(2, "0")}`;
-  const defaultDay = month === `${today.year}-${today.month}` ? today.day : 1;
-  const [picked, setPicked] = useState(defaultDay);
+  const dates = useMemo(() => periodDates(month, periodMode), [month, periodMode]);
+  const defaultStamp = dates.some((date) => date.stamp === todayStamp)
+    ? todayStamp
+    : dates[0]?.stamp ?? "";
+  const [picked, setPicked] = useState(defaultStamp);
   const [sort, setSort] = useState<AmountSort>("time");
+
+  useEffect(() => {
+    if (!dates.some((date) => date.stamp === picked)) setPicked(defaultStamp);
+  }, [dates, defaultStamp, picked]);
+
   const byDay = useMemo(() => {
-    const map = new Map<number, { expense: number; income: number; items: Tx[] }>();
+    const map = new Map<string, { expense: number; income: number; items: Tx[] }>();
     for (const tx of txs) {
       const p = shanghaiDate(tx.time);
-      if (`${p.year}-${p.month}` !== month) continue;
-      const cur = map.get(p.day) ?? { expense: 0, income: 0, items: [] };
+      const stamp = `${p.year}-${p.month}-${String(p.day).padStart(2, "0")}`;
+      if (!dates.some((date) => date.stamp === stamp)) continue;
+      const cur = map.get(stamp) ?? { expense: 0, income: 0, items: [] };
       if (tx.direction === "expense") cur.expense += tx.amountFen;
       if (tx.direction === "income") cur.income += tx.amountFen;
       cur.items.push(tx);
-      map.set(p.day, cur);
+      map.set(stamp, cur);
     }
     return map;
-  }, [txs, month]);
+  }, [txs, dates]);
 
-  const startWeekday = (new Date(Number(year), Number(mo) - 1, 1).getDay() + 6) % 7;
-  const cells: (number | null)[] = [
+  const first = dates[0];
+  const startWeekday = first
+    ? (new Date(Date.UTC(first.year, first.month - 1, first.day)).getUTCDay() + 6) % 7
+    : 0;
+  const cells: (PeriodDay | null)[] = [
     ...Array.from({ length: startWeekday }, () => null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+    ...dates,
   ];
   while (cells.length % 7 !== 0) cells.push(null);
   const selected = byDay.get(picked);
-  const monthHasMark = cells.some(
-    (d) => d !== null && holidayOf(dayStamp(year, mo, d)),
-  );
+  const monthHasMark = dates.some((date) => holidayOf(date.stamp));
+  const selectedDate = picked ? picked.split("-").map(Number) : null;
 
   return (
     <section className="rounded-xl bg-elevated px-4 py-4 shadow-[var(--shadow-border)]">
@@ -55,24 +74,43 @@ export function DayCalendar({ txs, month }: { txs: Tx[]; month: string }) {
         ))}
       </div>
       <div className="grid grid-cols-7">
-        {cells.map((d, i) => {
-          if (d === null) return <div key={`e-${i}`} className="min-h-14" />;
-          const row = byDay.get(d);
-          const stamp = dayStamp(year, mo, d);
-          const on = d === picked;
-          const mark = holidayOf(stamp);
+        {cells.map((date, i) => {
+          if (date === null) return <div key={`empty-${i}`} className="min-h-14" />;
+          const row = byDay.get(date.stamp);
+          const on = date.stamp === picked;
+          const mark = holidayOf(date.stamp);
+          const showMonth =
+            periodMode === "cycle15" && (i === startWeekday || date.day === 1);
           return (
             <button
-              key={d}
+              key={date.stamp}
               type="button"
-              onClick={() => setPicked(d)}
+              onClick={() => {
+                setPicked(date.stamp);
+                openComposer(date.stamp);
+              }}
               className={cn(
                 "flex min-h-14 flex-col items-center rounded-md px-0.5 py-1",
                 on && "bg-primary text-primary-fg",
-                !on && stamp === todayStamp && "bg-surface shadow-[var(--shadow-border)]",
+                !on && date.stamp === todayStamp && "bg-surface shadow-[var(--shadow-border)]",
               )}
+              aria-label={`${date.year}年${date.month}月${date.day}日，记一笔`}
             >
-              <span className={cn("text-xs", on ? "text-primary-fg" : "text-fg")}>{d}</span>
+              <span className="flex items-baseline gap-0.5">
+                <span className={cn("text-xs", on ? "text-primary-fg" : "text-fg")}>
+                  {date.day}
+                </span>
+                {showMonth ? (
+                  <span
+                    className={cn(
+                      "text-[8px] leading-none",
+                      on ? "text-primary-fg/75" : "text-subtle",
+                    )}
+                  >
+                    {date.month}月
+                  </span>
+                ) : null}
+              </span>
               {mark ? (
                 <span
                   className={cn(
@@ -88,12 +126,22 @@ export function DayCalendar({ txs, month }: { txs: Tx[]; month: string }) {
                 </span>
               ) : null}
               {row?.expense ? (
-                <span className={cn("text-[9px] tabular-nums", on ? "text-primary-fg/80" : "text-muted")}>
+                <span
+                  className={cn(
+                    "text-[9px] tabular-nums",
+                    on ? "text-primary-fg/80" : "text-muted",
+                  )}
+                >
                   −{formatYuan(row.expense)}
                 </span>
               ) : null}
               {row?.income ? (
-                <span className={cn("text-[9px] tabular-nums", on ? "text-primary-fg/80" : "text-income")}>
+                <span
+                  className={cn(
+                    "text-[9px] tabular-nums",
+                    on ? "text-primary-fg/80" : "text-income",
+                  )}
+                >
                   +{formatYuan(row.income)}
                 </span>
               ) : null}
@@ -102,8 +150,13 @@ export function DayCalendar({ txs, month }: { txs: Tx[]; month: string }) {
         })}
       </div>
       <p className="mt-3 text-xs text-muted">
-        {Number(mo)}月{picked}日
-        {selected ? ` · 支 ${formatYuan(selected.expense)} · 收 ${formatYuan(selected.income)}` : " · 没有记录"}
+        {selectedDate
+          ? `${selectedDate[1]}月${selectedDate[2]}日`
+          : "选择日期"}
+        {selected
+          ? ` · 支 ${formatYuan(selected.expense)} · 收 ${formatYuan(selected.income)}`
+          : " · 没有记录"}
+        <span className="ml-2 text-subtle">点日期可直接记一笔</span>
       </p>
       {monthHasMark ? (
         <p className="mt-1 text-[10px] text-subtle">

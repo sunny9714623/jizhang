@@ -7,6 +7,7 @@ import {
   monthKey,
   newId,
   shanghaiDate,
+  shanghaiDayValue,
   type CategoryId,
   type Direction,
   type Source,
@@ -39,6 +40,11 @@ import {
   type Recurring,
 } from "./models";
 import { DEFAULT_LEAVES, groupIdOf, leafLabel, type CatLeaf } from "./categories";
+import {
+  inPeriod,
+  periodMonthForTime,
+  type PeriodMode,
+} from "./period";
 import { type BookId } from "./books";
 import { DEFAULT_LEDGER, DEFAULT_LEDGER_ID, type LedgerFile } from "./ledgers";
 import { isAutoFineId, toPlainCategory } from "./fine-cat";
@@ -105,7 +111,7 @@ const emptyComposer = (): Composer => ({
   direction: "expense",
   merchant: "",
   category: "food",
-  date: new Date().toISOString().slice(0, 10),
+  date: shanghaiDayValue(Date.now()),
   note: "",
   source: "manual",
   receiptUrl: null,
@@ -117,6 +123,7 @@ type LedgerState = {
   txs: Tx[];
   tab: Tab;
   month: string;
+  periodMode: PeriodMode;
   search: string;
   catFilter: CategoryId | null;
   groupFilter: string | null;
@@ -148,13 +155,14 @@ type LedgerState = {
   hydrate: () => Promise<void>;
   setTab: (tab: Tab) => void;
   setMonth: (month: string) => void;
+  setPeriodMode: (mode: PeriodMode) => void;
   setSearch: (q: string) => void;
   setCatFilter: (id: CategoryId | null) => void;
   setGroupFilter: (id: string | null) => void;
   openCategory: (id: CategoryId) => void;
   openGroup: (id: string) => void;
   select: (id: string | null) => void;
-  openComposer: () => void;
+  openComposer: (date?: string) => void;
   closeComposer: () => void;
   patchComposer: (patch: Partial<Composer>) => void;
   saveManual: () => Promise<void>;
@@ -309,7 +317,7 @@ function syncActiveLedgerCats(get: () => LedgerState) {
   const ledgerId = get().cloudLedgerId;
   if (!familyId || !ledgerId || !me) return;
   const ledger = get().cloudLedgers.find((l) => l._id === ledgerId);
-  if (!ledger || ledger.ownerUid !== me) return;
+  if (!ledger) return;
   const bookRecurring = get().recurring.filter(
     (r) => (r.ledgerId ?? DEFAULT_LEDGER_ID) === get().ledgerId,
   );
@@ -367,7 +375,12 @@ function uniqueLedgerName(ledgers: LedgerFile[], base: string): string {
   return base.trim() || "恢复的账本";
 }
 
-export function monthStats(txs: Tx[], month: string, cats: CatLeaf[] = DEFAULT_LEAVES) {
+export function monthStats(
+  txs: Tx[],
+  month: string,
+  cats: CatLeaf[] = DEFAULT_LEAVES,
+  periodMode: PeriodMode = "calendar",
+) {
   let expense = 0;
   let income = 0;
   const byCat = new Map<CategoryId, number>();
@@ -376,7 +389,7 @@ export function monthStats(txs: Tx[], month: string, cats: CatLeaf[] = DEFAULT_L
   const countByGroup = new Map<string, number>();
   const countByCat = new Map<string, number>();
   for (const tx of txs) {
-    if (monthKey(tx.time) !== month) continue;
+    if (!inPeriod(tx.time, month, periodMode)) continue;
     if (isAccountTx(tx)) continue;
     const gid = groupIdOf(cats, tx.category);
     if (tx.direction === "expense") {
@@ -457,7 +470,7 @@ async function addTx(
     txs: cleaned,
     composing: false,
     usingSample: false,
-    month: monthKey(tx.time),
+    month: periodMonthForTime(tx.time, get().periodMode),
     tab: "list",
   });
   await dbPutMany(cleaned.filter((t) => t.origin !== "sample"));
@@ -480,7 +493,7 @@ async function writeLedgerTx(
   set({
     txs: cleaned,
     usingSample: false,
-    month: monthKey(tx.time),
+    month: periodMonthForTime(tx.time, get().periodMode),
   });
   await dbPutMany(cleaned.filter((t) => t.origin !== "sample"));
   const familyId = get().cloudFamilyId;
@@ -577,6 +590,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
   txs: SAMPLE_TX,
   tab: "home",
   month: monthKey(Date.now()),
+  periodMode: "calendar",
   search: "",
   catFilter: null,
   groupFilter: null,
@@ -623,10 +637,13 @@ export const useLedger = create<LedgerState>((set, get) => ({
       }
       const dark = (await dbGetMeta<boolean>("dark")) ?? false;
       const notifications = (await dbGetMeta<boolean>("notifications")) ?? true;
+      const periodMode =
+        (await dbGetMeta<PeriodMode>("periodMode")) ?? "calendar";
+      const hydratedMonth = periodMonthForTime(Date.now(), periodMode);
       const snap = rows.length === 0 ? readSnapshot() : null;
       if (rows.length === 0 && snap && snap.txs.some((t) => t.origin !== "sample")) {
         await applySnap(snap, set);
-        set({ dark, notifications });
+        set({ dark, notifications, periodMode, month: hydratedMonth });
         toast.message(`已从本地备份恢复 ${snap.txs.length} 笔`);
         return;
       }
@@ -697,6 +714,8 @@ export const useLedger = create<LedgerState>((set, get) => ({
           liveCapture,
           dark,
           notifications,
+          periodMode,
+          month: hydratedMonth,
           wallpaper,
           recurring: rec,
           accounts: acc,
@@ -717,6 +736,8 @@ export const useLedger = create<LedgerState>((set, get) => ({
           liveCapture,
           dark,
           notifications,
+          periodMode,
+          month: hydratedMonth,
           wallpaper,
           recurring: rec.filter((r) => !r.id.startsWith("sample")),
           accounts: acc.filter((a) => !isSampleAccount(a)),
@@ -738,6 +759,8 @@ export const useLedger = create<LedgerState>((set, get) => ({
           liveCapture,
           dark,
           notifications,
+          periodMode,
+          month: hydratedMonth,
           wallpaper,
           recurring: [],
           accounts: [],
@@ -756,13 +779,25 @@ export const useLedger = create<LedgerState>((set, get) => ({
 
   setTab: (tab) => set({ tab }),
   setMonth: (month) => set({ month }),
+  setPeriodMode: (periodMode) => {
+    let month = get().month;
+    if (periodMode === "cycle15" && month === monthKey(Date.now())) {
+      month = periodMonthForTime(Date.now(), periodMode);
+    }
+    set({ periodMode, month });
+    void dbSetMeta("periodMode", periodMode);
+  },
   setSearch: (search) => set({ search }),
   setCatFilter: (catFilter) => set({ catFilter, groupFilter: catFilter ? null : get().groupFilter }),
   setGroupFilter: (groupFilter) => set({ groupFilter, catFilter: groupFilter ? null : get().catFilter }),
   openCategory: (id) => set({ catFilter: id, groupFilter: null, tab: "list" }),
   openGroup: (id) => set({ groupFilter: id, catFilter: null, tab: "list" }),
   select: (selectedId) => set({ selectedId }),
-  openComposer: () => set({ composing: true, composer: emptyComposer() }),
+  openComposer: (date) => {
+    const composer = emptyComposer();
+    if (date) composer.date = date;
+    set({ composing: true, composer });
+  },
   closeComposer: () => set({ composing: false }),
   patchComposer: (patch) => set({ composer: { ...get().composer, ...patch } }),
 
@@ -878,7 +913,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
       txs,
       usingSample: false,
       composing: false,
-      month: monthKey(incoming[0].time),
+      month: periodMonthForTime(incoming[0].time, get().periodMode),
     });
     await dbPutMany(incoming);
     await dbSetMeta("usingSample", false);
@@ -1524,7 +1559,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
           cloudLedgers: cached.ledgers,
           txs: dedupeTxs(mergeCloudTxs(get().txs, cached.txs)),
           ledgerId: cached.ledgerId,
-          month: monthKey(Date.now()),
+          month: periodMonthForTime(Date.now(), get().periodMode),
           catFilter: null,
           groupFilter: null,
           selectedId: null,
@@ -1574,7 +1609,7 @@ export const useLedger = create<LedgerState>((set, get) => ({
         cloudLedgers,
         txs: merged,
         ledgerId: cloudLedgerId,
-        month: monthKey(Date.now()),
+        month: periodMonthForTime(Date.now(), get().periodMode),
         catFilter: null,
         groupFilter: null,
         selectedId: null,
@@ -1854,11 +1889,12 @@ export function visibleTxs(
   catFilter: CategoryId | null = null,
   groupFilter: string | null = null,
   cats: CatLeaf[] = DEFAULT_LEAVES,
+  periodMode: PeriodMode = "calendar",
 ): Tx[] {
   const q = search.trim().toLowerCase();
   return txs.filter((tx) => {
     // 有搜索词时跨整本账本（所有月份）搜索，避免“搜不到历史记录”
-    if (q ? false : monthKey(tx.time) !== month) return false;
+    if (q ? false : !inPeriod(tx.time, month, periodMode)) return false;
     if (groupFilter) {
       if (groupIdOf(cats, tx.category) !== groupFilter) return false;
       if (isAccountTx(tx)) return false;
@@ -1869,10 +1905,22 @@ export function visibleTxs(
       if (tx.direction !== "expense" || tx.category !== catFilter) return false;
     }
     if (!q) return true;
-    return `${tx.merchant}${tx.title}${tx.note}${tx.method}${leafLabel(cats, tx.category)}`
-      .toLowerCase()
-      .includes(q);
+    const text = `${tx.merchant}${tx.title}${tx.note}${tx.method}${leafLabel(cats, tx.category)}`
+      .toLowerCase();
+    return text.includes(q) || amountMatchesQuery(tx.amountFen, q);
   });
+}
+
+function amountMatchesQuery(amountFen: number, query: string): boolean {
+  const numeric = query.replace(/[¥￥元,\s]/g, "");
+  if (!/^\d+(?:\.\d{0,2})?$/.test(numeric)) return false;
+  const targetFen = Math.round(Number(numeric) * 100);
+  if (!Number.isFinite(targetFen)) return false;
+  if (amountFen === targetFen) return true;
+  if (numeric.includes(".")) return false;
+  const fixed = (amountFen / 100).toFixed(2);
+  const loose = fixed.replace(/\.?0+$/, "");
+  return fixed.includes(numeric) || loose.includes(numeric);
 }
 
 function isIncomeCatSafe(cats: CatLeaf[], id: string): boolean {

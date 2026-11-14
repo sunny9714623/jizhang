@@ -2,8 +2,6 @@ import { useState } from "react";
 import {
   formatYuan,
   formatSignedYuan,
-  monthKey,
-  shanghaiDate,
 } from "@/lib/ledger";
 import { leafColor, leafLabel } from "@/lib/categories";
 import { daysUntil } from "@/lib/models";
@@ -18,12 +16,14 @@ import { TxRow } from "@/components/tx-list";
 import { SortBar, sortTxs, type AmountSort } from "@/components/amount-sort";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { inPeriod, periodElapsedDays } from "@/lib/period";
 
 export function Overview() {
   const allTxs = useLedger((s) => s.txs);
   const ledgerId = useLedger((s) => s.ledgerId);
   const txs = txsInLedger(allTxs, ledgerId);
   const month = useLedger((s) => s.month);
+  const periodMode = useLedger((s) => s.periodMode);
   const setTab = useLedger((s) => s.setTab);
   const openCategory = useLedger((s) => s.openCategory);
   const setCatFilter = useLedger((s) => s.setCatFilter);
@@ -33,14 +33,9 @@ export function Overview() {
   const recurring = inLedger(recurringAll, ledgerId);
   const payRecurring = useLedger((s) => s.payRecurring);
   const openComposer = useLedger((s) => s.openComposer);
-  const stats = monthStats(txs, month, cats);
+  const stats = monthStats(txs, month, cats, periodMode);
   const [side, setSide] = useState<"expense" | "income">("expense");
   const [recentSort, setRecentSort] = useState<AmountSort>("time");
-  const daysInMonth = new Date(
-    Number(month.slice(0, 4)),
-    Number(month.slice(5, 7)),
-    0,
-  ).getDate();
   const catRows = cats
     .filter((c) => c.direction === "expense")
     .map((c) => ({
@@ -88,12 +83,10 @@ export function Overview() {
   }
   const chartRows = side === "expense" ? catRows : incomeRows;
   const chartTotal = side === "expense" ? stats.expense : stats.income;
-  const today = shanghaiDate(Date.now());
-  const daysElapsed =
-    month === `${today.year}-${today.month}` ? Math.max(1, today.day) : daysInMonth;
+  const daysElapsed = periodElapsedDays(month, periodMode);
   const daily = stats.expense / daysElapsed;
   const recent = sortTxs(
-    txs.filter((t) => monthKey(t.time) === month),
+    txs.filter((t) => inPeriod(t.time, month, periodMode)),
     recentSort,
   ).slice(0, 6);
   const due = dueRecurring(recurring);
@@ -105,7 +98,7 @@ export function Overview() {
       {needRecord ? (
         <button
           type="button"
-          onClick={openComposer}
+          onClick={() => openComposer()}
           className="rounded-md bg-elevated px-4 py-3 text-left text-sm text-fg shadow-[var(--shadow-border)]"
         >
           今天还没记账，点这里十秒记一笔
@@ -139,7 +132,9 @@ export function Overview() {
 
       <section className="rounded-xl bg-elevated px-5 pt-5 pb-4 shadow-[var(--shadow-border)]">
         <MonthBar />
-        <p className="mt-3 text-xs tracking-wide text-muted">本月支出</p>
+        <p className="mt-3 text-xs tracking-wide text-muted">
+          {periodMode === "cycle15" ? "本期支出" : "本月支出"}
+        </p>
         <p className="font-display text-5xl leading-none tracking-tight text-fg tabular-nums">
           {formatYuan(stats.expense)}
         </p>
@@ -162,11 +157,17 @@ export function Overview() {
             setSide("income");
           }}
         >
-          本月收入 <span className="text-income tabular-nums">{formatYuan(stats.income)}</span>
+          {periodMode === "cycle15" ? "本期收入" : "本月收入"}{" "}
+          <span className="text-income tabular-nums">{formatYuan(stats.income)}</span>
         </button>
       </section>
 
-      <DayCalendar key={month} txs={txs} month={month} />
+      <DayCalendar
+        key={`${month}-${periodMode}`}
+        txs={txs}
+        month={month}
+        periodMode={periodMode}
+      />
 
       {showSample ? (
         <p className="rounded-md bg-elevated px-4 py-3 text-sm text-muted shadow-[var(--shadow-border)]">

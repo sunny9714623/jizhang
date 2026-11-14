@@ -176,6 +176,19 @@ function AddLeaf({
           </button>
         ))}
       </div>
+      <div className="mt-2 flex items-center gap-2">
+        <span className="text-xs text-muted">或用输入法输图标</span>
+        <input
+          value={emoji}
+          onChange={(e) => {
+            setEmoji(e.target.value || "✨");
+            setImage(null);
+          }}
+          maxLength={4}
+          placeholder="🍰"
+          className="h-9 w-24 rounded-md bg-surface px-2 text-center text-lg shadow-[var(--shadow-border)]"
+        />
+      </div>
       <input
         ref={fileRef}
         type="file"
