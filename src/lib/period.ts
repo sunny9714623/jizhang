@@ -31,7 +31,7 @@ export function periodBounds(month: string, mode: PeriodMode) {
     const { year: nextYear, month: nextMonthNumber } = parseMonthKey(nextMonth);
     return {
       start: `${year}-${pad(monthNumber)}-15`,
-      end: `${nextYear}-${pad(nextMonthNumber)}-15`,
+      end: `${nextYear}-${pad(nextMonthNumber)}-14`,
     };
   }
   return {

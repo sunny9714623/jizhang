@@ -433,7 +433,7 @@ export function StatsView() {
         </div>
         {span === "cycle15" ? (
           <p className="mt-2 text-center text-xs text-subtle">
-            按每月15日至次月15日统计
+            按每月15日至次月14日统计
           </p>
         ) : null}
         <div className="mx-auto mt-2 grid w-fit grid-cols-3 gap-4 text-center text-xs">
